@@ -46,7 +46,7 @@
     # VM DEPLOYMENT
     # ========================================================================
     - name: Create Public IPs for Language Mixers
-      azure_rm_publicipaddress:
+      azure.azcollection.azure_rm_publicipaddress:
         name: "{{ item.name }}-{{ event_name }}-pip"
         resource_group: "{{ resource_group }}"
         allocation_method: Static
@@ -60,7 +60,7 @@
       tags: [deploy, networking]
 
     - name: Create Network Interfaces for Language Mixers
-      azure_rm_networkinterface:
+      azure.azcollection.azure_rm_networkinterface:
         name: "{{ item.name }}-{{ event_name }}-nic"
         resource_group: "{{ resource_group }}"
         virtual_network: "streaming-vnet"
@@ -80,7 +80,7 @@
       tags: [deploy, networking]
 
     - name: Create Language Mixer VMs
-      azure_rm_virtualmachine:
+      azure.azcollection.azure_rm_virtualmachine:
         name: "{{ item.name }}-{{ event_name }}"
         resource_group: "{{ resource_group }}"
         location: "{{ azure_location }}"
@@ -113,7 +113,7 @@
     # VM CONFIGURATION
     # ========================================================================
     - name: Wait for VMs to be ready
-      azure_rm_virtualmachine_info:
+      azure.azcollection.azure_rm_virtualmachine_info:
         name: "{{ item.name }}-{{ event_name }}"
         resource_group: "{{ resource_group }}"
       register: vm_info
@@ -124,7 +124,7 @@
       tags: [configure]
 
     - name: Get VM public IP addresses
-      azure_rm_publicipaddress_info:
+      azure.azcollection.azure_rm_publicipaddress_info:
         name: "{{ item.name }}-{{ event_name }}-pip"
         resource_group: "{{ resource_group }}"
       register: vm_public_ips
@@ -135,7 +135,7 @@
     # DYNAMIC INVENTORY REGISTRATION
     # ========================================================================
     - name: Add VMs to dynamic inventory
-      add_host:
+      ansible.builtin.add_host:
         name: "{{ item.0.name }}-{{ event_name }}"
         groups:
           - mixers
@@ -162,7 +162,7 @@
     # VM SOFTWARE CONFIGURATION (against dynamic hosts)
     # ========================================================================
     - name: Wait for WinRM to be available on all VMs
-      wait_for:
+      ansible.builtin.wait_for:
         host: >
           {{ hostvars[item.name + '-' + event_name]['ansible_host'] }}
         port: 5986
@@ -172,7 +172,7 @@
       tags: [configure]
 
     - name: Install OBS Studio on VMs
-      win_chocolatey:
+      chocolatey.chocolatey.win_chocolatey:
         name: obs-studio
         state: present
       delegate_to: "{{ item.name }}-{{ event_name }}"
@@ -180,7 +180,7 @@
       tags: [configure, obs]
 
     - name: Configure OBS scenes for each mixer
-      win_template:
+      ansible.windows.win_template:
         src: obs-scene-config.json.j2
         dest: >
           C:\Users\{{ vm_admin_username }}\AppData\Roaming\obs-studio\basic\scenes\{{ item.language }}.json
@@ -198,7 +198,7 @@
       tags: [configure, obs]
 
     - name: Configure Windows audio settings
-      win_shell: |
+      ansible.windows.win_shell: |
         # Set audio sample rate to 48kHz
         $audioDevice = Get-WmiObject -Class Win32_SoundDevice | Where-Object {$_.Name -like "*Realtek*"}
         if ($audioDevice) {
@@ -209,7 +209,7 @@
       tags: [configure, audio]
 
     - name: Create OBS startup script
-      win_copy:
+      ansible.windows.win_copy:
         content: |
           @echo off
           echo Starting OBS Studio for {{ item.language }} mixer...
@@ -225,7 +225,7 @@
     # VM VALIDATION
     # ========================================================================
     - name: Test RDP connectivity to all mixers
-      wait_for:
+      ansible.builtin.wait_for:
         host: >
           {{ hostvars[item.name + '-' + event_name]['ansible_host'] }}
         port: 3389
@@ -234,7 +234,7 @@
       tags: [validate]
 
     - name: Verify OBS installation on VMs
-      win_stat:
+      ansible.windows.win_stat:
         path: "C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe"
       register: obs_check
       delegate_to: "{{ item.name }}-{{ event_name }}"
@@ -242,7 +242,7 @@
       tags: [validate]
 
     - name: Check VM performance counters
-      win_shell: |
+      ansible.windows.win_shell: |
         $cpu = Get-Counter "\Processor(_Total)\% Processor Time" |
         Select-Object -ExpandProperty CounterSamples |
         Select-Object -ExpandProperty CookedValue
@@ -257,7 +257,7 @@
       tags: [validate]
 
     - name: Test network connectivity to containers
-      win_shell: |
+      ansible.windows.win_shell: |
         $relayTest = Test-NetConnection -ComputerName
         "{{ hostvars['localhost']['relay_ip'] | default('10.42.1.10') }}" -Port 9998
         $splitterTest = Test-NetConnection -ComputerName
@@ -273,7 +273,7 @@
     # STORE VM FACTS
     # ========================================================================
     - name: Store VM facts for other playbooks
-      set_fact:
+      ansible.builtin.set_fact:
         mixer_vms_info: "{{ mixer_vms.results }}"
         mixer_vm_names: >
           {{ mixer_vms.results | map(attribute='ansible_facts.azure_vm.name') |
@@ -288,7 +288,7 @@
     # VM MANAGEMENT SUMMARY
     # ========================================================================
     - name: Display VM management summary
-      debug:
+      ansible.builtin.debug:
         msg:
           - "============================================"
           - "🖥️  VIRTUAL MACHINES READY"

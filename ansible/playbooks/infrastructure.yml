@@ -25,116 +25,143 @@
 
   tasks:
     - name: Create Resource Group
-      azure_rm_resourcegroup:
+      azure.azcollection.azure_rm_resourcegroup:
         name: "{{ resource_group }}"
         location: "{{ azure_location }}"
         tags:
           purpose: streaming
           event: "{{ event_name }}"
-          created: "{{ ansible_date_time.iso8601 }}"
-          auto_cleanup: "true"
-          ttl: "24h"
-          deployment_phase: infrastructure
-      register: rg_result
+          created_by: ansible
+          environment: "{{ deployment_environment | default('production') }}"
+      tags: [deploy, resource_group]
 
+    # ========================================================================
+    # NETWORKING INFRASTRUCTURE
+    # ========================================================================
     - name: Create Virtual Network
-      azure_rm_virtualnetwork:
+      azure.azcollection.azure_rm_virtualnetwork:
         name: "streaming-vnet"
         resource_group: "{{ resource_group }}"
-        address_prefixes: "{{ vnet_address_space }}"
+        address_prefixes: "10.42.0.0/16"
         tags:
-          purpose: streaming
+          purpose: streaming-network
           event: "{{ event_name }}"
-      register: vnet_result
+      tags: [deploy, networking]
 
     - name: Create Container Subnet
-      azure_rm_subnet:
+      azure.azcollection.azure_rm_subnet:
         name: "containers"
-        virtual_network_name: "streaming-vnet"
+        virtual_network: "streaming-vnet"
         resource_group: "{{ resource_group }}"
-        address_prefix: "{{ container_subnet }}"
+        address_prefix: "10.42.1.0/24"
+      tags: [deploy, networking]
 
     - name: Create Mixer Subnet
-      azure_rm_subnet:
+      azure.azcollection.azure_rm_subnet:
         name: "mixers"
-        virtual_network_name: "streaming-vnet"
+        virtual_network: "streaming-vnet"
         resource_group: "{{ resource_group }}"
-        address_prefix: "{{ mixer_subnet }}"
+        address_prefix: "10.42.2.0/24"
+      tags: [deploy, networking]
 
-    - name: Create Network Security Group for Containers
-      azure_rm_securitygroup:
+    - name: Create Container Network Security Group
+      azure.azcollection.azure_rm_securitygroup:
         name: "streaming-containers-nsg"
         resource_group: "{{ resource_group }}"
-        rules:
-          - name: SRT-Relay-Inbound
-            protocol: Udp
-            destination_port_range: "9998"
-            access: Allow
-            priority: 100
-            direction: Inbound
-          - name: SRT-Splitter-Inbound
-            protocol: Udp
-            destination_port_range: "9999"
-            access: Allow
-            priority: 101
-            direction: Inbound
-          - name: Health-Check-Inbound
-            protocol: Tcp
-            destination_port_range: "8080"
-            access: Allow
-            priority: 102
-            direction: Inbound
         tags:
-          purpose: streaming
+          purpose: container-security
           event: "{{ event_name }}"
+        rules:
+          - name: AllowSRT
+            protocol: Tcp
+            destination_port_range: 9998
+            access: Allow
+            priority: 1000
+            direction: Inbound
+          - name: AllowSplitter
+            protocol: Tcp
+            destination_port_range: 9999
+            access: Allow
+            priority: 1001
+            direction: Inbound
+          - name: AllowHTTP
+            protocol: Tcp
+            destination_port_range: 8080
+            access: Allow
+            priority: 1002
+            direction: Inbound
+          - name: AllowSSH
+            protocol: Tcp
+            destination_port_range: 22
+            access: Allow
+            priority: 1003
+            direction: Inbound
+      tags: [deploy, networking, security]
 
-    - name: Create Network Security Group for Mixers
-      azure_rm_securitygroup:
+    - name: Create Mixer Network Security Group
+      azure.azcollection.azure_rm_securitygroup:
         name: "streaming-mixers-nsg"
         resource_group: "{{ resource_group }}"
-        rules:
-          - name: RDP-Inbound
-            protocol: Tcp
-            destination_port_range: "3389"
-            access: Allow
-            priority: 100
-            direction: Inbound
-          - name: SRT-Mixer-Inbound
-            protocol: Tcp
-            destination_port_range: "8001-8002"
-            access: Allow
-            priority: 101
-            direction: Inbound
-          - name: RTMP-Outbound
-            protocol: Tcp
-            destination_port_range: "1935"
-            access: Allow
-            priority: 100
-            direction: Outbound
-          - name: DNS-Outbound
-            protocol: Udp
-            destination_port_range: "53"
-            access: Allow
-            priority: 101
-            direction: Outbound
         tags:
-          purpose: streaming
+          purpose: mixer-security
           event: "{{ event_name }}"
+        rules:
+          - name: AllowRDP
+            protocol: Tcp
+            destination_port_range: 3389
+            access: Allow
+            priority: 1000
+            direction: Inbound
+          - name: AllowWinRM
+            protocol: Tcp
+            destination_port_range: 5986
+            access: Allow
+            priority: 1001
+            direction: Inbound
+          - name: AllowRTMP
+            protocol: Tcp
+            destination_port_range: 1935
+            access: Allow
+            priority: 1002
+            direction: Inbound
+          - name: AllowHTTP
+            protocol: Tcp
+            destination_port_range: 8080
+            access: Allow
+            priority: 1003
+            direction: Inbound
+      tags: [deploy, networking, security]
 
-    - name: Store infrastructure facts
-      set_fact:
+    # ========================================================================
+    # STORE INFRASTRUCTURE FACTS
+    # ========================================================================
+    - name: Store infrastructure facts for other playbooks
+      ansible.builtin.set_fact:
         streaming_resource_group: "{{ resource_group }}"
-        streaming_vnet: "streaming-vnet"
         streaming_location: "{{ azure_location }}"
+        streaming_vnet: "streaming-vnet"
+        container_subnet: "containers"
+        mixer_subnet: "mixers"
+        container_nsg: "streaming-containers-nsg"
+        mixer_nsg: "streaming-mixers-nsg"
       delegate_to: localhost
       delegate_facts: true
 
     - name: Display infrastructure summary
-      debug:
+      ansible.builtin.debug:
         msg:
-          - "Infrastructure deployed successfully!"
+          - "============================================"
+          - "🏗️  INFRASTRUCTURE READY"
+          - "============================================"
           - "Resource Group: {{ resource_group }}"
-          - "Virtual Network: streaming-vnet ({{ vnet_address_space }})"
-          - "Container Subnet: {{ container_subnet }}"
-          - "Mixer Subnet: {{ mixer_subnet }}"
           - "Location: {{ azure_location }}"
+          - "Virtual Network: streaming-vnet (10.42.0.0/16)"
+          - "Container Subnet: containers (10.42.1.0/24)"
+          - "Mixer Subnet: mixers (10.42.2.0/24)"
+          - "Network Security Groups:"
+          - "  - Container NSG: streaming-containers-nsg"
+          - "  - Mixer NSG: streaming-mixers-nsg"
+          - ""
+          - "Ready for resource deployment!"
+          - "============================================"
+      tags: [always]

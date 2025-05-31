@@ -53,20 +53,20 @@
         services:
           - name: ssh
             state: started
-            enabled: yes
+            enabled: true
 
   tasks:
     # ========================================================================
     # ENVIRONMENT DETECTION & VALIDATION
     # ========================================================================
     - name: Detect local environment type
-      set_fact:
+      ansible.builtin.set_fact:
         environment_type: "{{ group_names | select('match', '^env_.*') | first | default('generic') }}"
         os_family: "{{ ansible_os_family | lower }}"
       tags: [always]
 
     - name: Display environment information
-      debug:
+      ansible.builtin.debug:
         msg:
           - "🖥️  Environment: {{ environment_type }}"
           - "💻 OS Family: {{ os_family }}"
@@ -78,16 +78,17 @@
     # WINDOWS ENVIRONMENT MANAGEMENT
     # ========================================================================
     - name: Windows Environment Block
+      when: ansible_os_family == "Windows"
       block:
         # Software validation and installation
         - name: Check if Chocolatey is installed
-          win_stat:
+          ansible.windows.win_stat:
             path: "C:\\ProgramData\\chocolatey\\bin\\choco.exe"
           register: chocolatey_check
           tags: [validation, windows]
 
         - name: Install Chocolatey if missing
-          win_shell: |
+          ansible.windows.win_shell: |
             Set-ExecutionPolicy Bypass -Scope Process -Force
             [System.Net.ServicePointManager]::SecurityProtocol =
             [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
@@ -97,7 +98,7 @@
           tags: [remediation, windows]
 
         - name: Check installed Chocolatey packages
-          win_shell: choco list --local-only --exact {{ item }}
+          ansible.windows.win_shell: choco list --local-only --exact {{ item }}
           register: choco_package_check
           loop: >
             {{ common_requirements.windows.chocolatey_packages +
@@ -108,7 +109,7 @@
           tags: [validation, windows]
 
         - name: Install missing Chocolatey packages
-          win_chocolatey:
+          chocolatey.chocolatey.win_chocolatey:
             name: "{{ item.item }}"
             state: present
           when:
@@ -118,7 +119,7 @@
           tags: [remediation, windows]
 
         - name: Validate Windows registry settings
-          win_reg_stat:
+          ansible.windows.win_reg_stat:
             path: "{{ item.key }}"
             name: "{{ item.name }}"
           register: registry_check
@@ -129,7 +130,7 @@
           tags: [validation, windows]
 
         - name: Configure Windows registry settings
-          win_regedit:
+          ansible.windows.win_regedit:
             path: "{{ item.item.key }}"
             name: "{{ item.item.name }}"
             data: "{{ item.item.value }}"
@@ -140,28 +141,28 @@
           loop: "{{ registry_check.results }}"
           tags: [remediation, windows]
 
-      when: ansible_os_family == "Windows"
-
     # ========================================================================
     # MACOS ENVIRONMENT MANAGEMENT
     # ========================================================================
-    - name: macOS Environment Block
+    - name: MacOS Environment Block
+      when: ansible_os_family == "Darwin"
       block:
         - name: Check if Homebrew is installed
-          stat:
+          ansible.builtin.stat:
             path: /opt/homebrew/bin/brew
           register: homebrew_check
           tags: [validation, macos]
 
         - name: Install Homebrew if missing
-          shell: >
+          ansible.builtin.shell: >
             /bin/bash -c "$(curl -fsSL
             https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
           when: not homebrew_check.stat.exists and validation_mode != 'check_only'
+          changed_when: true
           tags: [remediation, macos]
 
         - name: Check installed Homebrew packages
-          shell: brew list {{ item }}
+          ansible.builtin.shell: brew list {{ item }}
           register: brew_package_check
           loop: >
             {{ common_requirements.macos.homebrew_packages +
@@ -172,7 +173,7 @@
           tags: [validation, macos]
 
         - name: Install missing Homebrew packages
-          homebrew:
+          community.general.homebrew:
             name: "{{ item.item }}"
             state: present
           when:
@@ -181,27 +182,26 @@
           loop: "{{ brew_package_check.results }}"
           tags: [remediation, macos]
 
-      when: ansible_os_family == "Darwin"
-
     # ========================================================================
     # LINUX ENVIRONMENT MANAGEMENT
     # ========================================================================
     - name: Linux Environment Block
+      when: ansible_os_family in ["Debian", "RedHat"]
       block:
         - name: Check installed packages (Ubuntu/Debian)
-          package_facts:
+          ansible.builtin.package_facts:
             manager: apt
           when: ansible_os_family == "Debian"
           tags: [validation, linux]
 
         - name: Check installed packages (RHEL/CentOS)
-          package_facts:
+          ansible.builtin.package_facts:
             manager: rpm
           when: ansible_os_family == "RedHat"
           tags: [validation, linux]
 
         - name: Install missing packages
-          package:
+          ansible.builtin.package:
             name: "{{ item }}"
             state: present
           loop: >
@@ -213,7 +213,7 @@
           tags: [remediation, linux]
 
         - name: Ensure services are running
-          service:
+          ansible.builtin.service:
             name: "{{ item.name }}"
             state: "{{ item.state }}"
             enabled: "{{ item.enabled }}"
@@ -223,27 +223,25 @@
           when: validation_mode != 'check_only'
           tags: [remediation, linux]
 
-      when: ansible_os_family in ["Debian", "RedHat"]
-
     # ========================================================================
     # ENVIRONMENT-SPECIFIC CONFIGURATIONS
     # ========================================================================
     - name: Apply OBS Station specific configurations
-      include_tasks: "../tasks/obs-station-config.yml"
+      ansible.builtin.include_tasks: "../tasks/obs-station-config.yml"
       when:
         - "'env_obs_station' in group_names"
         - validation_mode != 'check_only'
       tags: [remediation, obs_station]
 
     - name: Apply Audio Workstation specific configurations
-      include_tasks: "../tasks/audio-workstation-config.yml"
+      ansible.builtin.include_tasks: "../tasks/audio-workstation-config.yml"
       when:
         - "'env_audio_workstation' in group_names"
         - validation_mode != 'check_only'
       tags: [remediation, audio_workstation]
 
     - name: Apply Video Capture specific configurations
-      include_tasks: "../tasks/video-capture-config.yml"
+      ansible.builtin.include_tasks: "../tasks/video-capture-config.yml"
       when:
         - "'env_video_capture' in group_names"
         - validation_mode != 'check_only'
@@ -253,14 +251,15 @@
     # VALIDATION SUMMARY
     # ========================================================================
     - name: Generate environment validation report
-      template:
+      ansible.builtin.template:
         src: ../templates/validation-report.html.j2
         dest: "/tmp/{{ inventory_hostname }}-validation-{{ ansible_date_time.epoch }}.html"
+        mode: '0644'
       delegate_to: localhost
       tags: [reporting]
 
     - name: Display validation summary
-      debug:
+      ansible.builtin.debug:
         msg:
           - "✅ Environment validation completed"
           - "📊 Report: /tmp/{{ inventory_hostname }}-validation-{{ ansible_date_time.epoch }}.html"
