@@ -62,12 +62,23 @@
           - "============================================"
           - "🗑️  TEARDOWN COMPLETE"
           - "============================================"
-          - "{% if confirm_teardown.user_input | lower == 'yes' %}"
-          - "Deleted {{ unique_streaming_rgs | length }} resource groups:"
-          - "{% for rg in unique_streaming_rgs %}"
-          - "  ✓ {{ rg }}"
-          - "{% endfor %}"
-          - "{% else %}"
-          - "Operation cancelled by user"
-          - "{% endif %}"
+      when: confirm_teardown.user_input | lower == 'yes'
+
+    - name: Display cancellation message
+      ansible.builtin.debug:
+        msg:
           - "============================================"
+          - "❌ TEARDOWN CANCELLED"
+          - "============================================"
+          - "Operation cancelled by user"
+          - "============================================"
+      when: confirm_teardown.user_input | lower != 'yes'
+
+    - name: Display deleted resource groups
+      ansible.builtin.debug:
+        msg:
+          - "Deleted resource groups:"
+          - "{{ unique_streaming_rgs }}"
+      when:
+        - confirm_teardown.user_input | lower == 'yes'
+        - unique_streaming_rgs | length > 0
