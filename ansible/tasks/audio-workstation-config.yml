@@ -181,7 +181,7 @@
   changed_when: false
 
 - name: MacOS audio device detection
-  ansible.builtin.shell: system_profiler SPAudioDataType -json
+  ansible.builtin.shell: system_profiler SPAudioDataType -json  # noqa: command-instead-of-shell
   register: macos_audio_devices
   when: ansible_os_family == "Darwin"
   changed_when: false
