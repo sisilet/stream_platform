@@ -15,4 +15,4 @@ rules:
   document-start: disable  # Allow missing --- at start
   indentation:
     spaces: 2
-    indent-sequences: true 
+    indent-sequences: true

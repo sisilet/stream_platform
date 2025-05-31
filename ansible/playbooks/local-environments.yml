@@ -21,7 +21,7 @@
   vars:
     # Environment validation settings
     validation_mode: "{{ validation_mode | default('check_and_fix') }}"  # check_only, check_and_fix, force_install
-    
+
     # Common software requirements across environments
     common_requirements:
       windows:
@@ -36,14 +36,14 @@
             name: "ProxyEnable"
             value: 0
             type: "dword"
-      
+
       macos:
         homebrew_packages:
           - ffmpeg
           - git
         system_settings:
           - defaults: "com.apple.screensaver askForPassword -int 1"
-      
+
       linux:
         packages:
           - ffmpeg
@@ -89,15 +89,20 @@
         - name: Install Chocolatey if missing
           win_shell: |
             Set-ExecutionPolicy Bypass -Scope Process -Force
-            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-            iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+            [System.Net.ServicePointManager]::SecurityProtocol =
+            [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+            iex ((New-Object System.Net.WebClient).DownloadString(
+            'https://chocolatey.org/install.ps1'))
           when: not chocolatey_check.stat.exists and validation_mode != 'check_only'
           tags: [remediation, windows]
 
         - name: Check installed Chocolatey packages
           win_shell: choco list --local-only --exact {{ item }}
           register: choco_package_check
-          loop: "{{ common_requirements.windows.chocolatey_packages + (env_specific_requirements.windows.chocolatey_packages | default([])) }}"
+          loop: >
+            {{ common_requirements.windows.chocolatey_packages +
+            (env_specific_requirements.windows.chocolatey_packages |
+            default([])) }}
           failed_when: false
           changed_when: false
           tags: [validation, windows]
@@ -106,7 +111,7 @@
           win_chocolatey:
             name: "{{ item.item }}"
             state: present
-          when: 
+          when:
             - validation_mode != 'check_only'
             - item.rc != 0
           loop: "{{ choco_package_check.results }}"
@@ -117,7 +122,10 @@
             path: "{{ item.key }}"
             name: "{{ item.name }}"
           register: registry_check
-          loop: "{{ common_requirements.windows.registry_settings + (env_specific_requirements.windows.registry_settings | default([])) }}"
+          loop: >
+            {{ common_requirements.windows.registry_settings +
+            (env_specific_requirements.windows.registry_settings |
+            default([])) }}
           tags: [validation, windows]
 
         - name: Configure Windows registry settings
@@ -135,7 +143,7 @@
       when: ansible_os_family == "Windows"
 
     # ========================================================================
-    # MACOS ENVIRONMENT MANAGEMENT  
+    # MACOS ENVIRONMENT MANAGEMENT
     # ========================================================================
     - name: macOS Environment Block
       block:
@@ -146,14 +154,19 @@
           tags: [validation, macos]
 
         - name: Install Homebrew if missing
-          shell: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          shell: >
+            /bin/bash -c "$(curl -fsSL
+            https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
           when: not homebrew_check.stat.exists and validation_mode != 'check_only'
           tags: [remediation, macos]
 
         - name: Check installed Homebrew packages
           shell: brew list {{ item }}
           register: brew_package_check
-          loop: "{{ common_requirements.macos.homebrew_packages + (env_specific_requirements.macos.homebrew_packages | default([])) }}"
+          loop: >
+            {{ common_requirements.macos.homebrew_packages +
+            (env_specific_requirements.macos.homebrew_packages |
+            default([])) }}
           failed_when: false
           changed_when: false
           tags: [validation, macos]
@@ -191,7 +204,9 @@
           package:
             name: "{{ item }}"
             state: present
-          loop: "{{ common_requirements.linux.packages + (env_specific_requirements.linux.packages | default([])) }}"
+          loop: >
+            {{ common_requirements.linux.packages +
+            (env_specific_requirements.linux.packages | default([])) }}
           when:
             - validation_mode != 'check_only'
             - item not in ansible_facts.packages
@@ -202,7 +217,9 @@
             name: "{{ item.name }}"
             state: "{{ item.state }}"
             enabled: "{{ item.enabled }}"
-          loop: "{{ common_requirements.linux.services + (env_specific_requirements.linux.services | default([])) }}"
+          loop: >
+            {{ common_requirements.linux.services +
+            (env_specific_requirements.linux.services | default([])) }}
           when: validation_mode != 'check_only'
           tags: [remediation, linux]
 
@@ -213,7 +230,7 @@
     # ========================================================================
     - name: Apply OBS Station specific configurations
       include_tasks: "../tasks/obs-station-config.yml"
-      when: 
+      when:
         - "'env_obs_station' in group_names"
         - validation_mode != 'check_only'
       tags: [remediation, obs_station]
@@ -249,4 +266,4 @@
           - "📊 Report: /tmp/{{ inventory_hostname }}-validation-{{ ansible_date_time.epoch }}.html"
           - "🔄 Mode: {{ validation_mode }}"
           - "🎯 Environment: {{ environment_type }}"
-      tags: [always] 
+      tags: [always]

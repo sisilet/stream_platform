@@ -16,22 +16,30 @@
   gather_facts: true
   vars:
     event_name: "{{ event_name | default('streaming-event') }}"
-    resource_group: "{{ hostvars['localhost']['streaming_resource_group'] | default('streaming-' + event_name + '-' + ansible_date_time.epoch) }}"
-    azure_location: "{{ hostvars['localhost']['streaming_location'] | default('East US') }}"
-    
+    resource_group: >
+      {{ hostvars['localhost']['streaming_resource_group'] |
+      default('streaming-' + event_name + '-' + ansible_date_time.epoch) }}
+    azure_location: >
+      {{ hostvars['localhost']['streaming_location'] | default('East US') }}
+
     # VM configuration
     vm_admin_username: "streamadmin"
     vm_admin_password: "{{ vm_admin_password | default('StreamAdmin2024!') }}"
     vm_size: "Standard_D2s_v3"
-    
+
     # YouTube keys (override via extra-vars)
-    youtube_keys_list: "{{ youtube_keys.split(',') if youtube_keys is defined else ['key1', 'key2', 'key3'] }}"
-    
+    youtube_keys_list: >
+      {{ youtube_keys.split(',') if youtube_keys is defined else
+      ['key1', 'key2', 'key3'] }}
+
     # Mixer configuration
     mixer_configs:
-      - {name: "mixer-01", ip: "10.42.2.11", language: "original", audio_channels: "0,1"}
-      - {name: "mixer-02", ip: "10.42.2.12", language: "language-a", audio_channels: "2,3"}
-      - {name: "mixer-03", ip: "10.42.2.13", language: "language-b", audio_channels: "4,5"}
+      - {name: "mixer-01", ip: "10.42.2.11", language: "original",
+         audio_channels: "0,1"}
+      - {name: "mixer-02", ip: "10.42.2.12", language: "language-a",
+         audio_channels: "2,3"}
+      - {name: "mixer-03", ip: "10.42.2.13", language: "language-b",
+         audio_channels: "4,5"}
 
   tasks:
     # ========================================================================
@@ -155,7 +163,8 @@
     # ========================================================================
     - name: Wait for WinRM to be available on all VMs
       wait_for:
-        host: "{{ hostvars[item.name + '-' + event_name]['ansible_host'] }}"
+        host: >
+          {{ hostvars[item.name + '-' + event_name]['ansible_host'] }}
         port: 5986
         timeout: 300
         delay: 30
@@ -173,13 +182,17 @@
     - name: Configure OBS scenes for each mixer
       win_template:
         src: obs-scene-config.json.j2
-        dest: "C:\\Users\\{{ vm_admin_username }}\\AppData\\Roaming\\obs-studio\\basic\\scenes\\{{ item.language }}.json"
+        dest: >
+          C:\Users\{{ vm_admin_username }}\AppData\Roaming\obs-studio\basic\scenes\{{ item.language }}.json
       vars:
         mixer_language: "{{ item.language }}"
         audio_channels: "{{ item.audio_channels }}"
-        youtube_key: "{{ youtube_keys_list[ansible_loop.index0] | default('default-key') }}"
-        relay_ip: "{{ hostvars['localhost']['relay_ip'] | default('10.42.1.10') }}"
-        splitter_ip: "{{ hostvars['localhost']['splitter_ip'] | default('10.42.1.11') }}"
+        youtube_key: >
+          {{ youtube_keys_list[ansible_loop.index0] | default('default-key') }}
+        relay_ip: >
+          {{ hostvars['localhost']['relay_ip'] | default('10.42.1.10') }}
+        splitter_ip: >
+          {{ hostvars['localhost']['splitter_ip'] | default('10.42.1.11') }}
       delegate_to: "{{ item.name }}-{{ event_name }}"
       loop: "{{ mixer_configs }}"
       tags: [configure, obs]
@@ -213,7 +226,8 @@
     # ========================================================================
     - name: Test RDP connectivity to all mixers
       wait_for:
-        host: "{{ hostvars[item.name + '-' + event_name]['ansible_host'] }}"
+        host: >
+          {{ hostvars[item.name + '-' + event_name]['ansible_host'] }}
         port: 3389
         timeout: 60
       loop: "{{ mixer_configs }}"
@@ -229,9 +243,14 @@
 
     - name: Check VM performance counters
       win_shell: |
-        $cpu = Get-Counter "\Processor(_Total)\% Processor Time" | Select-Object -ExpandProperty CounterSamples | Select-Object -ExpandProperty CookedValue
-        $memory = Get-Counter "\Memory\Available MBytes" | Select-Object -ExpandProperty CounterSamples | Select-Object -ExpandProperty CookedValue
-        Write-Output "CPU: $([math]::Round($cpu,2))%, Available Memory: $([math]::Round($memory))MB"
+        $cpu = Get-Counter "\Processor(_Total)\% Processor Time" |
+        Select-Object -ExpandProperty CounterSamples |
+        Select-Object -ExpandProperty CookedValue
+        $memory = Get-Counter "\Memory\Available MBytes" |
+        Select-Object -ExpandProperty CounterSamples |
+        Select-Object -ExpandProperty CookedValue
+        Write-Output "CPU: $([math]::Round($cpu,2))%,
+        Available Memory: $([math]::Round($memory))MB"
       register: perf_check
       delegate_to: "{{ item.name }}-{{ event_name }}"
       loop: "{{ mixer_configs }}"
@@ -239,9 +258,12 @@
 
     - name: Test network connectivity to containers
       win_shell: |
-        $relayTest = Test-NetConnection -ComputerName "{{ hostvars['localhost']['relay_ip'] | default('10.42.1.10') }}" -Port 9998
-        $splitterTest = Test-NetConnection -ComputerName "{{ hostvars['localhost']['splitter_ip'] | default('10.42.1.11') }}" -Port 9999
-        Write-Output "Relay connectivity: $($relayTest.TcpTestSucceeded), Splitter connectivity: $($splitterTest.TcpTestSucceeded)"
+        $relayTest = Test-NetConnection -ComputerName
+        "{{ hostvars['localhost']['relay_ip'] | default('10.42.1.10') }}" -Port 9998
+        $splitterTest = Test-NetConnection -ComputerName
+        "{{ hostvars['localhost']['splitter_ip'] | default('10.42.1.11') }}" -Port 9999
+        Write-Output "Relay connectivity: $($relayTest.TcpTestSucceeded),
+        Splitter connectivity: $($splitterTest.TcpTestSucceeded)"
       register: network_check
       delegate_to: "{{ item.name }}-{{ event_name }}"
       loop: "{{ mixer_configs }}"
@@ -253,8 +275,12 @@
     - name: Store VM facts for other playbooks
       set_fact:
         mixer_vms_info: "{{ mixer_vms.results }}"
-        mixer_vm_names: "{{ mixer_vms.results | map(attribute='ansible_facts.azure_vm.name') | list }}"
-        mixer_public_ips: "{{ vm_public_ips.results | map(attribute='publicipaddresses.0.ip_address') | list }}"
+        mixer_vm_names: >
+          {{ mixer_vms.results | map(attribute='ansible_facts.azure_vm.name') |
+          list }}
+        mixer_public_ips: >
+          {{ vm_public_ips.results |
+          map(attribute='publicipaddresses.0.ip_address') | list }}
       delegate_to: localhost
       delegate_facts: true
 
@@ -271,10 +297,16 @@
           - "{% for config in mixer_configs %}"
           - "  {{ config.name | upper }} ({{ config.language }}):"
           - "    - Private IP: {{ config.ip }}"
-          - "    - Public IP: {{ mixer_vms.results[loop.index0].ansible_facts.azure_vm.network_profile.network_interfaces[0].ip_configurations[0].public_ip_address.ip_address | default('N/A') }}"
+          - >
+            {% set vm_info = mixer_vms.results[loop.index0].ansible_facts.azure_vm %}
+            {% set net_profile = vm_info.network_profile.network_interfaces[0] %}
+            {% set ip_config = net_profile.ip_configurations[0] %}
+            {% set public_ip = ip_config.public_ip_address.ip_address | default('N/A') %}
+            - Public IP: {{ public_ip }}
           - "    - RDP: {{ config.ip }}:3389"
           - "    - Audio Channels: {{ config.audio_channels }}"
-          - "    - YouTube Key: {{ youtube_keys_list[loop.index0] | default('Not configured') }}"
+          - >
+            - YouTube Key: {{ youtube_keys_list[loop.index0] | default('Not configured') }}
           - "{% endfor %}"
           - ""
           - "VM Configuration:"
@@ -285,4 +317,4 @@
           - ""
           - "Ready for streaming!"
           - "============================================"
-      tags: [always] 
+      tags: [always]

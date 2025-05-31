@@ -230,4 +230,4 @@
 - name: Display Windows disk space
   debug:
     msg: "Available C: drive space: {{ windows_disk_space.stdout | trim }} GB"
-  when: ansible_os_family == "Windows" 
+  when: ansible_os_family == "Windows"

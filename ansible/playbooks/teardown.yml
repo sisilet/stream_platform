@@ -7,7 +7,7 @@
     event_name: "{{ event_name | default('streaming-event') }}"
     resource_group: >
       {{ resource_group | default('streaming-' + event_name + '-*') }}
-    
+
   tasks:
     - name: Find resource groups for event
       azure_rm_resourcegroup_info:
@@ -64,4 +64,4 @@
           - "Teardown completed successfully!"
           - "Deleted {{ target_rgs | length }} resource group(s)"
           - "All streaming infrastructure has been removed"
-          - "Cost: $0 (resources no longer exist)" 
+          - "Cost: $0 (resources no longer exist)"

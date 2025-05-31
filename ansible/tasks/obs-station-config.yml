@@ -156,4 +156,4 @@
   debug:
     msg:
       - "YouTube RTMP connectivity: {{ 'OK' if youtube_connectivity.status == 200 else 'FAILED' }}"
-      - "Response time: {{ youtube_connectivity.elapsed if youtube_connectivity.elapsed is defined else 'N/A' }}s" 
+      - "Response time: {{ youtube_connectivity.elapsed if youtube_connectivity.elapsed is defined else 'N/A' }}s"

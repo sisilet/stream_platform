@@ -1,4 +1,14 @@
 ---
+# ============================================================================
+# INFRASTRUCTURE DEPLOYMENT
+# ============================================================================
+# This playbook manages Azure infrastructure deployment:
+# - Resource groups with auto-cleanup tags
+# - Virtual networks and subnets
+# - Network security groups with streaming-specific rules
+# - Storage for container and VM networking
+# ============================================================================
+
 - name: Deploy Streaming Infrastructure
   hosts: localhost
   connection: local
@@ -7,7 +17,7 @@
     event_name: "{{ event_name | default('streaming-event') }}"
     resource_group: "streaming-{{ event_name }}-{{ ansible_date_time.epoch }}"
     azure_location: "{{ azure_location | default('East US') }}"
-    
+
     # Network configuration
     vnet_address_space: "10.42.0.0/16"
     container_subnet: "10.42.1.0/24"
@@ -127,4 +137,4 @@
           - "Virtual Network: streaming-vnet ({{ vnet_address_space }})"
           - "Container Subnet: {{ container_subnet }}"
           - "Mixer Subnet: {{ mixer_subnet }}"
-          - "Location: {{ azure_location }}" 
+          - "Location: {{ azure_location }}"

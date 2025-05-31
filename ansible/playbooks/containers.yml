@@ -20,7 +20,7 @@
     azure_location: >
       {{ hostvars['localhost']['streaming_location'] | default('East US') }}
     acr_name: "{{ acr_name | default('streamingregistry') }}"
-    
+
     # Container configuration
     relay_cpu: 2
     relay_memory: 4
@@ -229,4 +229,4 @@
           - ""
           - "Ready for stream input!"
           - "============================================"
-      tags: [always] 
+      tags: [always]
