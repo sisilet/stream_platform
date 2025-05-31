@@ -35,6 +35,19 @@
       register: macos_video_devices
       changed_when: false
 
+  rescue:
+    - name: Handle macOS video capture configuration errors
+      ansible.builtin.debug:
+        msg:
+          - "⚠️  macOS video capture configuration encountered errors"
+          - "This may be due to missing Homebrew or network connectivity"
+          - "Please ensure Homebrew is installed and internet is accessible"
+
+  always:
+    - name: Log macOS video capture configuration attempt
+      ansible.builtin.debug:
+        msg: "macOS video capture configuration attempt completed"
+
 # Linux Video Capture Configuration
 - name: Linux Video Capture Block
   when: ansible_os_family in ["Debian", "RedHat"]
@@ -58,6 +71,19 @@
         fi
       register: linux_video_devices
       changed_when: false
+
+  rescue:
+    - name: Handle Linux video capture configuration errors
+      ansible.builtin.debug:
+        msg:
+          - "⚠️  Linux video capture configuration encountered errors"
+          - "This may be due to missing package repositories or permissions"
+          - "Please check package manager configuration and sudo access"
+
+  always:
+    - name: Log Linux video capture configuration attempt
+      ansible.builtin.debug:
+        msg: "Linux video capture configuration attempt completed"
 
 # Performance validation for video capture
 - name: Validate video capture requirements

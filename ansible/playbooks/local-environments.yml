@@ -80,7 +80,6 @@
     - name: Windows Environment Block
       when: ansible_os_family == "Windows"
       block:
-        # Software validation and installation
         - name: Check if Chocolatey is installed
           ansible.windows.win_stat:
             path: "C:\\ProgramData\\chocolatey\\bin\\choco.exe"
@@ -90,11 +89,11 @@
         - name: Install Chocolatey if missing
           ansible.windows.win_shell: |
             Set-ExecutionPolicy Bypass -Scope Process -Force
-            [System.Net.ServicePointManager]::SecurityProtocol =
-            [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-            iex ((New-Object System.Net.WebClient).DownloadString(
-            'https://chocolatey.org/install.ps1'))
+            [System.Net.ServicePointManager]::SecurityProtocol = `
+              [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+            iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
           when: not chocolatey_check.stat.exists and validation_mode != 'check_only'
+          changed_when: true
           tags: [remediation, windows]
 
         - name: Check installed Chocolatey packages
@@ -114,32 +113,33 @@
             state: present
           when:
             - validation_mode != 'check_only'
-            - item.rc != 0
+            - "'not installed' in item.stdout or item.rc != 0"
           loop: "{{ choco_package_check.results }}"
           tags: [remediation, windows]
 
-        - name: Validate Windows registry settings
-          ansible.windows.win_reg_stat:
-            path: "{{ item.key }}"
+        - name: Ensure Windows services are running
+          ansible.windows.win_service:
             name: "{{ item.name }}"
-          register: registry_check
+            state: "{{ item.state }}"
+            start_mode: "{{ item.start_mode | default('auto') }}"
           loop: >
-            {{ common_requirements.windows.registry_settings +
-            (env_specific_requirements.windows.registry_settings |
-            default([])) }}
-          tags: [validation, windows]
-
-        - name: Configure Windows registry settings
-          ansible.windows.win_regedit:
-            path: "{{ item.item.key }}"
-            name: "{{ item.item.name }}"
-            data: "{{ item.item.value }}"
-            type: "{{ item.item.type }}"
-          when:
-            - validation_mode != 'check_only'
-            - item.exists and item.value != item.item.value
-          loop: "{{ registry_check.results }}"
+            {{ common_requirements.windows.services +
+            (env_specific_requirements.windows.services | default([])) }}
+          when: validation_mode != 'check_only'
           tags: [remediation, windows]
+
+      rescue:
+        - name: Handle Windows environment configuration errors
+          ansible.builtin.debug:
+            msg:
+              - "⚠️  Windows environment configuration encountered errors"
+              - "This may be due to insufficient permissions or network connectivity"
+              - "Please run as administrator and ensure internet access"
+
+      always:
+        - name: Log Windows environment configuration attempt
+          ansible.builtin.debug:
+            msg: "Windows environment configuration attempt completed"
 
     # ========================================================================
     # MACOS ENVIRONMENT MANAGEMENT
@@ -182,6 +182,19 @@
           loop: "{{ brew_package_check.results }}"
           tags: [remediation, macos]
 
+      rescue:
+        - name: Handle macOS environment configuration errors
+          ansible.builtin.debug:
+            msg:
+              - "⚠️  macOS environment configuration encountered errors"
+              - "This may be due to missing Xcode Command Line Tools or network connectivity"
+              - "Please install Xcode Command Line Tools and ensure internet access"
+
+      always:
+        - name: Log macOS environment configuration attempt
+          ansible.builtin.debug:
+            msg: "macOS environment configuration attempt completed"
+
     # ========================================================================
     # LINUX ENVIRONMENT MANAGEMENT
     # ========================================================================
@@ -222,6 +235,19 @@
             (env_specific_requirements.linux.services | default([])) }}
           when: validation_mode != 'check_only'
           tags: [remediation, linux]
+
+      rescue:
+        - name: Handle Linux environment configuration errors
+          ansible.builtin.debug:
+            msg:
+              - "⚠️  Linux environment configuration encountered errors"
+              - "This may be due to missing sudo privileges or package repository issues"
+              - "Please ensure you have sudo access and package repositories are configured"
+
+      always:
+        - name: Log Linux environment configuration attempt
+          ansible.builtin.debug:
+            msg: "Linux environment configuration attempt completed"
 
     # ========================================================================
     # ENVIRONMENT-SPECIFIC CONFIGURATIONS

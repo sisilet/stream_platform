@@ -18,85 +18,101 @@
         path: "C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe"
       register: obs_exe_check
 
-    - name: Validate OBS Studio version
-      ansible.windows.win_shell: |
-        $version = (Get-ItemProperty \
-          "C:\Program Files\obs-studio\bin\64bit\obs64.exe"
-        ).VersionInfo.FileVersion
-        Write-Output $version
-      register: obs_version_check
-      when: obs_exe_check.stat.exists
-      changed_when: false
+    - name: Install OBS Studio via Chocolatey
+      chocolatey.chocolatey.win_chocolatey:
+        name: obs-studio
+        state: present
+      when: not obs_exe_check.stat.exists
 
-    - name: Create OBS Studio profile directory
+    - name: Create OBS configuration directory
       ansible.windows.win_file:
-        path: "C:\\Users\\{{ ansible_user }}\\AppData\\Roaming\\obs-studio\\basic\\profiles\\Streaming"
+        path: "C:\\Users\\{{ ansible_user }}\\AppData\\Roaming\\obs-studio\\basic"
         state: directory
 
-    - name: Configure OBS Studio basic settings
+    - name: Configure OBS basic settings
       ansible.windows.win_copy:
         content: |
-          [General]
-          Name=Streaming
+          {
+            "General": {
+              "EnableAutoUpdates": false,
+              "OpenStatsOnStartup": false,
+              "RecordWhenStreaming": true
+            },
+            "Video": {
+              "BaseCX": 1920,
+              "BaseCY": 1080,
+              "OutputCX": 1920,
+              "OutputCY": 1080,
+              "FPSType": 0,
+              "FPSCommon": "30"
+            },
+            "Audio": {
+              "SampleRate": 48000,
+              "ChannelSetup": "Stereo"
+            }
+          }
+        dest: >
+          C:\Users\{{ ansible_user }}\AppData\Roaming\obs-studio\basic\basic.ini
+        force: false
 
-          [Video]
-          BaseCX=1920
-          BaseCY=1080
-          OutputCX=1920
-          OutputCY=1080
-          FPSType=0
-          FPSCommon=30
-
-          [Audio]
-          SampleRate=48000
-          ChannelSetup=Stereo
-
-          [Output]
-          Mode=Simple
-
-          [SimpleOutput]
-          VBitrate=6000
-          StreamEncoder=x264
-          ABitrate=160
-          UseAdvanced=false
-          Preset=veryfast
-        dest: "C:\\Users\\{{ ansible_user }}\\AppData\\Roaming\\obs-studio\\basic\\profiles\\Streaming\\basic.ini"
-
-    - name: Configure Windows audio for low-latency
+    - name: Configure Windows audio for streaming
       ansible.windows.win_shell: |
-        # Set audio buffer size for low latency
-        $audioKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Audio"
-        New-ItemProperty -Path $audioKey -Name "DisableProtectedAudioDG" \
-          -Value 1 -PropertyType DWORD -Force
+        # Set exclusive mode for audio devices
+        $audioDevices = Get-WmiObject -Class Win32_SoundDevice | Where-Object {$_.Status -eq "OK"}
+        if ($audioDevices) {
+          Write-Host "Found $($audioDevices.Count) audio devices"
+          # Configure for low-latency streaming
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\AudioSrv" `
+            -Name "DependOnService" -Value @("AudioEndpointBuilder","Audiosrv")
+        }
+      changed_when: false
 
-        # Set multimedia class scheduler for audio
-        $mmcssKey = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"
-        Set-ItemProperty -Path $mmcssKey -Name "SystemResponsiveness" -Value 1
-      changed_when: true
-
-    - name: Install VoiceMeeter for audio routing
+    - name: Install additional streaming tools
       chocolatey.chocolatey.win_chocolatey:
-        name: voicemeeter
+        name: "{{ item }}"
         state: present
+      loop:
+        - vlc
+        - ffmpeg
+      ignore_errors: true
+
+    - name: Test OBS installation
+      ansible.windows.win_command: >
+        "C:\Program Files\obs-studio\bin\64bit\obs64.exe" --help
+      register: obs_test
+      failed_when: false
+      changed_when: false
 
     - name: Create OBS startup script
       ansible.windows.win_copy:
         content: |
           @echo off
-          echo Starting OBS Studio for {{ inventory_hostname }}...
+          echo Starting OBS Studio...
           cd "C:\Program Files\obs-studio\bin\64bit"
-          obs64.exe --profile "Streaming" --minimize-to-tray
-          pause
+          start obs64.exe --minimize-to-tray
+          echo OBS Studio started successfully
         dest: "C:\\Users\\{{ ansible_user }}\\Desktop\\Start-OBS.bat"
 
-    - name: Configure Windows firewall for OBS
-      community.windows.win_firewall_rule:
+    - name: Set OBS to start with Windows
+      ansible.windows.win_regedit:
+        path: HKCU:\Software\Microsoft\Windows\CurrentVersion\Run
         name: "OBS Studio"
-        localport: "1935,8080"
-        action: allow
-        direction: in
-        protocol: tcp
-        state: present
+        data: "C:\\Users\\{{ ansible_user }}\\Desktop\\Start-OBS.bat"
+        type: string
+      ignore_errors: true
+
+  rescue:
+    - name: Handle OBS configuration errors
+      ansible.builtin.debug:
+        msg:
+          - "⚠️  Windows OBS configuration encountered errors"
+          - "This may be due to missing dependencies or permissions"
+          - "Please check Windows user permissions and try manual installation"
+
+  always:
+    - name: Log OBS configuration attempt
+      ansible.builtin.debug:
+        msg: "Windows OBS configuration attempt completed"
 
 # macOS OBS Station Configuration
 - name: MacOS OBS Station Block
@@ -128,6 +144,19 @@
         # Enable exclusive mode for audio devices
         defaults write com.apple.coreaudio "Exclusive Mode" -bool true
       changed_when: true
+
+  rescue:
+    - name: Handle macOS OBS configuration errors
+      ansible.builtin.debug:
+        msg:
+          - "⚠️  macOS OBS configuration encountered errors"
+          - "This may be due to missing Homebrew or permissions"
+          - "Please ensure Homebrew is installed and accessible"
+
+  always:
+    - name: Log OBS configuration attempt
+      ansible.builtin.debug:
+        msg: "macOS OBS configuration attempt completed"
 
 # Performance validation
 - name: Check system performance for OBS

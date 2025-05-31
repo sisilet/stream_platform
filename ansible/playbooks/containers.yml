@@ -131,9 +131,10 @@
     # ========================================================================
     - name: Test SRT Relay health endpoint
       ansible.builtin.uri:
-        url: "http://{{ relay_container.ip_address }}:8080/health"
+        url: "https://{{ relay_container.ip_address }}:8443/health"
         method: GET
         status_code: 200
+        validate_certs: false  # Allow self-signed certs in dev environment
       retries: 5
       delay: 10
       tags: [validate]
