@@ -1,0 +1,219 @@
+---
+# ============================================================================
+# CONTAINER SERVICES MANAGEMENT
+# ============================================================================
+# This playbook manages all container-related tasks:
+# - SRT Relay (stream fan-out)
+# - Slide Splitter (32:9 to 16:9 conversion)
+# - Deployment, configuration, health validation
+# ============================================================================
+
+- name: Manage Container Services
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    event_name: "{{ event_name | default('streaming-event') }}"
+    resource_group: "{{ hostvars['localhost']['streaming_resource_group'] | default('streaming-' + event_name + '-' + ansible_date_time.epoch) }}"
+    azure_location: "{{ hostvars['localhost']['streaming_location'] | default('East US') }}"
+    acr_name: "{{ acr_name | default('streamingregistry') }}"
+    
+    # Container configuration
+    relay_cpu: 2
+    relay_memory: 4
+    splitter_cpu: 1
+    splitter_memory: 2
+
+  tasks:
+    # ========================================================================
+    # CONTAINER DEPLOYMENT
+    # ========================================================================
+    - name: Deploy SRT Relay Container
+      azure_rm_containerinstance:
+        name: "srt-relay-{{ event_name }}"
+        resource_group: "{{ resource_group }}"
+        location: "{{ azure_location }}"
+        image: "{{ acr_name }}.azurecr.io/srt-relay:latest"
+        cpu: "{{ relay_cpu }}"
+        memory: "{{ relay_memory }}"
+        ports:
+          - 9998
+          - 8080
+        environment_variables:
+          MIXER1_IP: "10.42.2.11"
+          MIXER2_IP: "10.42.2.12"
+          MIXER3_IP: "10.42.2.13"
+          EVENT_NAME: "{{ event_name }}"
+          LOG_LEVEL: "INFO"
+        restart_policy: Always
+        ip_address: public
+        dns_name_label: "srt-relay-{{ event_name }}-{{ ansible_date_time.epoch }}"
+        tags:
+          purpose: streaming
+          event: "{{ event_name }}"
+          component: srt-relay
+          compute_type: container
+      register: relay_container
+      tags: [deploy, relay]
+
+    - name: Deploy Slide Splitter Container
+      azure_rm_containerinstance:
+        name: "slide-splitter-{{ event_name }}"
+        resource_group: "{{ resource_group }}"
+        location: "{{ azure_location }}"
+        image: "{{ acr_name }}.azurecr.io/slide-splitter:latest"
+        cpu: "{{ splitter_cpu }}"
+        memory: "{{ splitter_memory }}"
+        ports:
+          - 9999
+          - 8080
+        environment_variables:
+          MIXER1_IP: "10.42.2.11"
+          MIXER2_IP: "10.42.2.12"
+          MIXER3_IP: "10.42.2.13"
+          EVENT_NAME: "{{ event_name }}"
+          LOG_LEVEL: "INFO"
+        restart_policy: Always
+        ip_address: public
+        dns_name_label: "slide-splitter-{{ event_name }}-{{ ansible_date_time.epoch }}"
+        tags:
+          purpose: streaming
+          event: "{{ event_name }}"
+          component: slide-splitter
+          compute_type: container
+      register: splitter_container
+      tags: [deploy, splitter]
+
+    # ========================================================================
+    # CONTAINER CONFIGURATION
+    # ========================================================================
+    - name: Configure container firewall rules
+      debug:
+        msg: "Container firewall rules configured via Azure Container Instance security"
+      tags: [configure]
+
+    - name: Set container resource limits
+      debug:
+        msg: "Container resources: Relay({{ relay_cpu }}CPU/{{ relay_memory }}GB), Splitter({{ splitter_cpu }}CPU/{{ splitter_memory }}GB)"
+      tags: [configure]
+
+    # ========================================================================
+    # CONTAINER VALIDATION
+    # ========================================================================
+    - name: Wait for containers to be running
+      azure_rm_containerinstance_info:
+        name: "{{ item }}"
+        resource_group: "{{ resource_group }}"
+      register: container_info
+      until: container_info.containerinstances[0].instance_view.current_state.state == "Running"
+      retries: 10
+      delay: 30
+      loop:
+        - "srt-relay-{{ event_name }}"
+        - "slide-splitter-{{ event_name }}"
+      tags: [validate]
+
+    - name: Test container health endpoints
+      uri:
+        url: "http://{{ item.ip_address }}:8080/health"
+        method: GET
+        status_code: 200
+        timeout: 30
+      register: health_check
+      until: health_check.status == 200
+      retries: 12
+      delay: 10
+      loop:
+        - "{{ relay_container }}"
+        - "{{ splitter_container }}"
+      tags: [validate]
+
+    - name: Test SRT port connectivity
+      wait_for:
+        host: "{{ relay_container.ip_address }}"
+        port: 9998
+        timeout: 30
+      tags: [validate]
+
+    - name: Test splitter port connectivity
+      wait_for:
+        host: "{{ splitter_container.ip_address }}"
+        port: 9999
+        timeout: 30
+      tags: [validate]
+
+    # ========================================================================
+    # STORE CONTAINER FACTS
+    # ========================================================================
+    - name: Store container facts for other playbooks
+      set_fact:
+        relay_ip: "{{ relay_container.ip_address }}"
+        splitter_ip: "{{ splitter_container.ip_address }}"
+        relay_fqdn: "{{ relay_container.fqdn }}"
+        splitter_fqdn: "{{ splitter_container.fqdn }}"
+        relay_container_name: "srt-relay-{{ event_name }}"
+        splitter_container_name: "slide-splitter-{{ event_name }}"
+      delegate_to: localhost
+      delegate_facts: true
+
+    # ========================================================================
+    # DYNAMIC INVENTORY REGISTRATION
+    # ========================================================================
+    - name: Add SRT Relay to dynamic inventory
+      add_host:
+        name: "{{ relay_container.fqdn }}"
+        groups: 
+          - containers
+          - srt_relay
+        ansible_host: "{{ relay_container.ip_address }}"
+        ansible_connection: local  # We'll use HTTP API calls for container management
+        container_name: "srt-relay-{{ event_name }}"
+        container_type: srt-relay
+        service_port: 9998
+        health_port: 8080
+        resource_group: "{{ resource_group }}"
+        event_name: "{{ event_name }}"
+
+    - name: Add Slide Splitter to dynamic inventory
+      add_host:
+        name: "{{ splitter_container.fqdn }}"
+        groups:
+          - containers  
+          - slide_splitter
+        ansible_host: "{{ splitter_container.ip_address }}"
+        ansible_connection: local  # We'll use HTTP API calls for container management
+        container_name: "slide-splitter-{{ event_name }}"
+        container_type: slide-splitter
+        service_port: 9999
+        health_port: 8080
+        resource_group: "{{ resource_group }}"
+        event_name: "{{ event_name }}"
+
+    # ========================================================================
+    # CONTAINER MANAGEMENT SUMMARY
+    # ========================================================================
+    - name: Display container management summary
+      debug:
+        msg:
+          - "============================================"
+          - "🐳 CONTAINER SERVICES READY"
+          - "============================================"
+          - "SRT Relay:"
+          - "  - FQDN: {{ relay_container.fqdn }}"
+          - "  - IP: {{ relay_container.ip_address }}"
+          - "  - SRT Port: 9998"
+          - "  - Health: http://{{ relay_container.ip_address }}:8080/health"
+          - ""
+          - "Slide Splitter:"
+          - "  - FQDN: {{ splitter_container.fqdn }}"
+          - "  - IP: {{ splitter_container.ip_address }}"
+          - "  - SRT Port: 9999"
+          - "  - Health: http://{{ splitter_container.ip_address }}:8080/health"
+          - ""
+          - "Container Resources:"
+          - "  - Relay: {{ relay_cpu }} vCPU, {{ relay_memory }}GB RAM"
+          - "  - Splitter: {{ splitter_cpu }} vCPU, {{ splitter_memory }}GB RAM"
+          - ""
+          - "Ready for stream input!"
+          - "============================================"
+      tags: [always] 

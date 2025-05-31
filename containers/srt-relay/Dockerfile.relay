@@ -1,0 +1,89 @@
+# Multi-stage build for SRT Relay Entry Node
+FROM ubuntu:22.04 AS builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    pkg-config \
+    libssl-dev \
+    libsrt-openssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build latest ffmpeg with SRT support
+WORKDIR /tmp
+RUN git clone --depth 1 --branch n6.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg
+WORKDIR /tmp/ffmpeg
+RUN ./configure \
+    --enable-libsrt \
+    --enable-openssl \
+    --enable-static \
+    --disable-debug \
+    --disable-doc \
+    --disable-ffplay \
+    --prefix=/usr/local
+RUN make -j$(nproc) && make install
+
+# Production stage
+FROM ubuntu:22.04
+
+LABEL maintainer="Streaming Team"
+LABEL description="SRT Relay Entry Node for Multilingual Streaming Pipeline"
+LABEL version="1.0"
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libsrt-openssl-dev \
+    libssl3 \
+    curl \
+    jq \
+    netcat-openbsd \
+    iproute2 \
+    procps \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy ffmpeg from builder stage
+COPY --from=builder /usr/local/bin/ffmpeg /usr/local/bin/
+COPY --from=builder /usr/local/bin/ffprobe /usr/local/bin/
+
+# Create non-root user
+RUN groupadd -r srtrelay && useradd -r -g srtrelay -s /bin/bash srtrelay
+
+# Create directories
+RUN mkdir -p /app/scripts /app/logs /app/config /var/log/srtrelay \
+    && chown -R srtrelay:srtrelay /app /var/log/srtrelay
+
+# Copy application scripts
+COPY scripts/ /app/scripts/
+COPY config/ /app/config/
+
+# Make scripts executable
+RUN chmod +x /app/scripts/*.sh
+
+# Set working directory
+WORKDIR /app
+
+# Environment variables
+ENV SRT_INPUT_PORT=9998
+ENV MIXER1_IP=10.42.0.11
+ENV MIXER2_IP=10.42.0.12
+ENV MIXER3_IP=10.42.0.13
+ENV MIXER_PORT=8001
+ENV LOG_LEVEL=info
+ENV HEALTH_CHECK_PORT=8080
+
+# Expose ports
+EXPOSE ${SRT_INPUT_PORT}/udp
+EXPOSE ${HEALTH_CHECK_PORT}/tcp
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD /app/scripts/healthcheck.sh
+
+# Switch to non-root user
+USER srtrelay
+
+# Default command
+CMD ["/app/scripts/start-relay.sh"] 

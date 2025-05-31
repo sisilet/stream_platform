@@ -1,0 +1,60 @@
+---
+- name: Teardown Streaming Infrastructure
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    event_name: "{{ event_name | default('streaming-event') }}"
+    resource_group: "{{ resource_group | default('streaming-' + event_name + '-*') }}"
+    
+  tasks:
+    - name: Find resource groups for event
+      azure_rm_resourcegroup_info:
+        name: "{{ resource_group }}"
+      register: found_rgs
+      when: "'*' not in resource_group"
+
+    - name: Find all streaming resource groups
+      azure_rm_resourcegroup_info:
+      register: all_rgs
+      when: "'*' in resource_group"
+
+    - name: Filter streaming resource groups
+      set_fact:
+        target_rgs: "{{ all_rgs.resourcegroups | selectattr('name', 'match', '^streaming-.*') | list }}"
+      when: "'*' in resource_group"
+
+    - name: Set target resource groups
+      set_fact:
+        target_rgs: "{{ found_rgs.resourcegroups }}"
+      when: "'*' not in resource_group and found_rgs.resourcegroups is defined"
+
+    - name: Display resource groups to be deleted
+      debug:
+        msg:
+          - "The following resource groups will be deleted:"
+          - "{{ target_rgs | map(attribute='name') | list }}"
+
+    - name: Confirm deletion
+      pause:
+        prompt: "Are you sure you want to delete these resource groups? Type 'yes' to continue"
+      register: confirmation
+      when: not (force_delete | default(false))
+
+    - name: Delete resource groups
+      azure_rm_resourcegroup:
+        name: "{{ item.name }}"
+        state: absent
+        force_delete_nonempty: true
+      loop: "{{ target_rgs }}"
+      when: 
+        - target_rgs is defined
+        - (force_delete | default(false)) or (confirmation.user_input | default('') == 'yes')
+
+    - name: Display teardown summary
+      debug:
+        msg:
+          - "Teardown completed successfully!"
+          - "Deleted {{ target_rgs | length }} resource group(s)"
+          - "All streaming infrastructure has been removed"
+          - "Cost: $0 (resources no longer exist)" 

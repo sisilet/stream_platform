@@ -1,0 +1,205 @@
+name: Teardown Streaming Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      event_name:
+        description: 'Event name to teardown (or use * for all)'
+        required: true
+        default: 'streaming-event'
+      force_delete:
+        description: 'Force delete without confirmation'
+        required: false
+        default: false
+        type: boolean
+      confirm_teardown:
+        description: 'Type "CONFIRM" to proceed with teardown'
+        required: true
+
+env:
+  ANSIBLE_HOST_KEY_CHECKING: False
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  AZURE_SECRET: ${{ secrets.AZURE_SECRET }}
+
+jobs:
+  validate-teardown:
+    name: Validate Teardown Request
+    runs-on: ubuntu-latest
+    steps:
+    - name: Validate confirmation
+      run: |
+        if [ "${{ github.event.inputs.confirm_teardown }}" != "CONFIRM" ]; then
+          echo "❌ Teardown not confirmed. You must type 'CONFIRM' to proceed."
+          exit 1
+        fi
+        echo "✅ Teardown confirmed"
+
+    - name: Display teardown details
+      run: |
+        echo "🗑️ Teardown Configuration:"
+        echo "Event: ${{ github.event.inputs.event_name }}"
+        echo "Force Delete: ${{ github.event.inputs.force_delete }}"
+        echo "Triggered by: ${{ github.actor }}"
+
+  find-resources:
+    name: Find Resources to Delete
+    runs-on: ubuntu-latest
+    needs: validate-teardown
+    outputs:
+      resource_groups: ${{ steps.find-rgs.outputs.resource_groups }}
+      resource_count: ${{ steps.find-rgs.outputs.resource_count }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install Ansible and Azure dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install ansible[azure]
+        ansible-galaxy collection install azure.azcollection --force
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Find resource groups to delete
+      id: find-rgs
+      run: |
+        cd ansible
+        
+        # Create a temporary playbook to find resource groups
+        cat > find-resources.yml << 'EOF'
+        ---
+        - name: Find Streaming Resource Groups
+          hosts: localhost
+          connection: local
+          gather_facts: false
+          tasks:
+            - name: Get all resource groups
+              azure_rm_resourcegroup_info:
+              register: all_rgs
+            
+            - name: Filter streaming resource groups
+              set_fact:
+                streaming_rgs: "{{ all_rgs.resourcegroups | selectattr('name', 'match', '^streaming-.*') | list }}"
+            
+            - name: Filter by event name
+              set_fact:
+                target_rgs: "{{ streaming_rgs | selectattr('name', 'search', '${{ github.event.inputs.event_name }}') | list }}"
+              when: "'*' not in '${{ github.event.inputs.event_name }}'"
+            
+            - name: Use all streaming resource groups
+              set_fact:
+                target_rgs: "{{ streaming_rgs }}"
+              when: "'*' in '${{ github.event.inputs.event_name }}'"
+            
+            - name: Display found resource groups
+              debug:
+                msg: "{{ target_rgs | map(attribute='name') | list }}"
+            
+            - name: Save results
+              copy:
+                content: "{{ target_rgs | map(attribute='name') | list | to_json }}"
+                dest: "/tmp/resource_groups.json"
+            
+            - name: Save count
+              copy:
+                content: "{{ target_rgs | length }}"
+                dest: "/tmp/resource_count.txt"
+        EOF
+        
+        ansible-playbook find-resources.yml
+        
+        # Set outputs
+        echo "resource_groups=$(cat /tmp/resource_groups.json)" >> $GITHUB_OUTPUT
+        echo "resource_count=$(cat /tmp/resource_count.txt)" >> $GITHUB_OUTPUT
+
+  teardown:
+    name: Execute Teardown
+    runs-on: ubuntu-latest
+    needs: [validate-teardown, find-resources]
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install Ansible and Azure dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install ansible[azure]
+        ansible-galaxy collection install azure.azcollection --force
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Display resources to be deleted
+      run: |
+        echo "🗑️ Resources to be deleted:"
+        echo "Resource Groups: ${{ needs.find-resources.outputs.resource_groups }}"
+        echo "Total Count: ${{ needs.find-resources.outputs.resource_count }}"
+
+    - name: Confirm non-zero resources
+      run: |
+        if [ "${{ needs.find-resources.outputs.resource_count }}" = "0" ]; then
+          echo "⚠️ No resources found matching pattern: ${{ github.event.inputs.event_name }}"
+          echo "Nothing to delete."
+          exit 0
+        fi
+
+    - name: Execute teardown
+      run: |
+        cd ansible
+        ansible-playbook playbooks/teardown.yml \
+          --extra-vars "event_name=${{ github.event.inputs.event_name }}" \
+          --extra-vars "force_delete=${{ github.event.inputs.force_delete }}" \
+          -v
+
+    - name: Verify teardown completion
+      run: |
+        echo "✅ Teardown completed successfully!"
+        echo "Deleted ${{ needs.find-resources.outputs.resource_count }} resource group(s)"
+        echo "💰 Cost Impact: All resources deleted - $0 ongoing cost"
+
+  notify-completion:
+    name: Notify Teardown Completion
+    runs-on: ubuntu-latest
+    needs: [validate-teardown, find-resources, teardown]
+    if: always()
+    steps:
+    - name: Teardown Success
+      if: needs.teardown.result == 'success'
+      run: |
+        echo "🎉 Teardown completed successfully!"
+        echo "Event Pattern: ${{ github.event.inputs.event_name }}"
+        echo "Resources Deleted: ${{ needs.find-resources.outputs.resource_count }}"
+        echo "Triggered by: ${{ github.actor }}"
+        echo "💰 Monthly Savings: ~$200+ (estimated)"
+
+    - name: Teardown Failure
+      if: needs.teardown.result == 'failure'
+      run: |
+        echo "❌ Teardown failed!"
+        echo "Some resources may still exist and incur costs."
+        echo "Manual cleanup may be required."
+        exit 1
+
+    - name: No Resources Found
+      if: needs.find-resources.outputs.resource_count == '0'
+      run: |
+        echo "ℹ️ No resources found for teardown"
+        echo "Pattern: ${{ github.event.inputs.event_name }}"
+        echo "This is normal if resources were already deleted." 

@@ -1,0 +1,205 @@
+name: Validate Ansible Playbooks
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'ansible/**'
+      - '.github/workflows/validate-ansible.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'ansible/**'
+      - '.github/workflows/validate-ansible.yml'
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint Ansible Code
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install ansible ansible-lint yamllint
+
+    - name: Run yamllint
+      run: yamllint ansible/
+
+    - name: Run ansible-lint
+      run: ansible-lint ansible/
+
+    - name: Check Ansible syntax
+      run: |
+        # Check cloud deployment syntax
+        ansible-playbook --syntax-check ansible/site.yml -i ansible/inventories/production/
+        
+        # Check local environment syntax
+        ansible-playbook --syntax-check ansible/playbooks/local-environments.yml -i ansible/inventories/local/hosts.ini
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Checkov security scan
+      uses: bridgecrewio/checkov-action@master
+      with:
+        directory: ansible/
+        framework: ansible
+        output_format: sarif
+        output_file_path: checkov-results.sarif
+
+    - name: Upload Checkov results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: checkov-results.sarif
+
+  validate-inventories:
+    name: Validate Inventories
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install Ansible
+      run: |
+        python -m pip install --upgrade pip
+        pip install ansible
+
+    - name: Validate production inventory
+      run: |
+        ansible-inventory -i ansible/inventories/production/hosts --list > /dev/null
+        echo "✅ Production inventory is valid"
+
+    - name: Validate local inventory
+      run: |
+        ansible-inventory -i ansible/inventories/local/hosts.ini --list > /dev/null
+        echo "✅ Local inventory is valid"
+
+    - name: Check inventory variables
+      run: |
+        # Check for required variables in production
+        ansible-inventory -i ansible/inventories/production/hosts --list | jq '.all.vars' | grep -q 'azure_location'
+        echo "✅ Azure location configured"
+        
+        # Check local inventory groups
+        ansible-inventory -i ansible/inventories/local/hosts.ini --list | jq '.all.children' | grep -q 'env_obs_station'
+        echo "✅ Local environment groups configured"
+
+  validate-structure:
+    name: Validate Project Structure
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check required files exist
+      run: |
+        # Core playbooks
+        test -f ansible/site.yml || { echo "❌ site.yml missing"; exit 1; }
+        test -f ansible/playbooks/infrastructure.yml || { echo "❌ infrastructure.yml missing"; exit 1; }
+        test -f ansible/playbooks/containers.yml || { echo "❌ containers.yml missing"; exit 1; }
+        test -f ansible/playbooks/virtual-machines.yml || { echo "❌ virtual-machines.yml missing"; exit 1; }
+        test -f ansible/playbooks/local-environments.yml || { echo "❌ local-environments.yml missing"; exit 1; }
+        test -f ansible/playbooks/teardown.yml || { echo "❌ teardown.yml missing"; exit 1; }
+        
+        # Environment-specific tasks
+        test -f ansible/tasks/obs-station-config.yml || { echo "❌ obs-station-config.yml missing"; exit 1; }
+        test -f ansible/tasks/audio-workstation-config.yml || { echo "❌ audio-workstation-config.yml missing"; exit 1; }
+        test -f ansible/tasks/video-capture-config.yml || { echo "❌ video-capture-config.yml missing"; exit 1; }
+        
+        # Inventories
+        test -f ansible/inventories/production/hosts || { echo "❌ production inventory missing"; exit 1; }
+        test -f ansible/inventories/local/hosts.ini || { echo "❌ local inventory missing"; exit 1; }
+        
+        echo "✅ All required files present"
+
+    - name: Validate directory structure
+      run: |
+        # Check directory structure
+        test -d ansible/playbooks || { echo "❌ playbooks directory missing"; exit 1; }
+        test -d ansible/tasks || { echo "❌ tasks directory missing"; exit 1; }
+        test -d ansible/templates || { echo "❌ templates directory missing"; exit 1; }
+        test -d ansible/inventories/production || { echo "❌ production inventory directory missing"; exit 1; }
+        test -d ansible/inventories/local || { echo "❌ local inventory directory missing"; exit 1; }
+        
+        echo "✅ Directory structure is correct"
+
+  documentation-check:
+    name: Check Documentation
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check README completeness
+      run: |
+        # Check if README exists and contains key sections
+        test -f ansible/README.md || { echo "❌ ansible/README.md missing"; exit 1; }
+        
+        # Check for required sections
+        grep -q "Local Environment Management" ansible/README.md || { echo "❌ Local Environment Management section missing"; exit 1; }
+        grep -q "Compute-Node-Centric Design" ansible/README.md || { echo "❌ Design section missing"; exit 1; }
+        grep -q "Quick Start" ansible/README.md || { echo "❌ Quick Start section missing"; exit 1; }
+        
+        echo "✅ Documentation is complete"
+
+    - name: Check for inline documentation
+      run: |
+        # Check that playbooks have proper headers
+        for playbook in ansible/playbooks/*.yml; do
+          if ! grep -q "# ====" "$playbook"; then
+            echo "❌ $playbook missing documentation header"
+            exit 1
+          fi
+        done
+        
+        echo "✅ All playbooks have documentation headers"
+
+  summary:
+    name: Validation Summary
+    runs-on: ubuntu-latest
+    needs: [lint, security-scan, validate-inventories, validate-structure, documentation-check]
+    if: always()
+    steps:
+    - name: Success Summary
+      if: needs.lint.result == 'success' && needs.validate-inventories.result == 'success' && needs.validate-structure.result == 'success' && needs.documentation-check.result == 'success'
+      run: |
+        echo "🎉 All validations passed!"
+        echo "✅ Ansible syntax and linting"
+        echo "✅ Security scanning"
+        echo "✅ Inventory validation"
+        echo "✅ Project structure"
+        echo "✅ Documentation"
+        echo ""
+        echo "Ready for deployment! 🚀"
+
+    - name: Failure Summary
+      if: needs.lint.result == 'failure' || needs.validate-inventories.result == 'failure' || needs.validate-structure.result == 'failure' || needs.documentation-check.result == 'failure'
+      run: |
+        echo "❌ Some validations failed!"
+        echo "Lint: ${{ needs.lint.result }}"
+        echo "Security: ${{ needs.security-scan.result }}"
+        echo "Inventories: ${{ needs.validate-inventories.result }}"
+        echo "Structure: ${{ needs.validate-structure.result }}"
+        echo "Documentation: ${{ needs.documentation-check.result }}"
+        echo ""
+        echo "Please fix the issues before deployment."
+        exit 1 

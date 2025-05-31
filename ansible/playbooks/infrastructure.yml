@@ -1,0 +1,130 @@
+---
+- name: Deploy Streaming Infrastructure
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    event_name: "{{ event_name | default('streaming-event') }}"
+    resource_group: "streaming-{{ event_name }}-{{ ansible_date_time.epoch }}"
+    azure_location: "{{ azure_location | default('East US') }}"
+    
+    # Network configuration
+    vnet_address_space: "10.42.0.0/16"
+    container_subnet: "10.42.1.0/24"
+    mixer_subnet: "10.42.2.0/24"
+
+  tasks:
+    - name: Create Resource Group
+      azure_rm_resourcegroup:
+        name: "{{ resource_group }}"
+        location: "{{ azure_location }}"
+        tags:
+          purpose: streaming
+          event: "{{ event_name }}"
+          created: "{{ ansible_date_time.iso8601 }}"
+          auto_cleanup: "true"
+          ttl: "24h"
+          deployment_phase: infrastructure
+      register: rg_result
+
+    - name: Create Virtual Network
+      azure_rm_virtualnetwork:
+        name: "streaming-vnet"
+        resource_group: "{{ resource_group }}"
+        address_prefixes: "{{ vnet_address_space }}"
+        tags:
+          purpose: streaming
+          event: "{{ event_name }}"
+      register: vnet_result
+
+    - name: Create Container Subnet
+      azure_rm_subnet:
+        name: "containers"
+        virtual_network_name: "streaming-vnet"
+        resource_group: "{{ resource_group }}"
+        address_prefix: "{{ container_subnet }}"
+
+    - name: Create Mixer Subnet
+      azure_rm_subnet:
+        name: "mixers"
+        virtual_network_name: "streaming-vnet"
+        resource_group: "{{ resource_group }}"
+        address_prefix: "{{ mixer_subnet }}"
+
+    - name: Create Network Security Group for Containers
+      azure_rm_securitygroup:
+        name: "streaming-containers-nsg"
+        resource_group: "{{ resource_group }}"
+        rules:
+          - name: SRT-Relay-Inbound
+            protocol: Udp
+            destination_port_range: "9998"
+            access: Allow
+            priority: 100
+            direction: Inbound
+          - name: SRT-Splitter-Inbound
+            protocol: Udp
+            destination_port_range: "9999"
+            access: Allow
+            priority: 101
+            direction: Inbound
+          - name: Health-Check-Inbound
+            protocol: Tcp
+            destination_port_range: "8080"
+            access: Allow
+            priority: 102
+            direction: Inbound
+        tags:
+          purpose: streaming
+          event: "{{ event_name }}"
+
+    - name: Create Network Security Group for Mixers
+      azure_rm_securitygroup:
+        name: "streaming-mixers-nsg"
+        resource_group: "{{ resource_group }}"
+        rules:
+          - name: RDP-Inbound
+            protocol: Tcp
+            destination_port_range: "3389"
+            access: Allow
+            priority: 100
+            direction: Inbound
+          - name: SRT-Mixer-Inbound
+            protocol: Tcp
+            destination_port_range: "8001-8002"
+            access: Allow
+            priority: 101
+            direction: Inbound
+          - name: RTMP-Outbound
+            protocol: Tcp
+            destination_port_range: "1935"
+            access: Allow
+            priority: 100
+            direction: Outbound
+          - name: DNS-Outbound
+            protocol: Udp
+            destination_port_range: "53"
+            access: Allow
+            priority: 101
+            direction: Outbound
+        tags:
+          purpose: streaming
+          event: "{{ event_name }}"
+
+    - name: Store infrastructure facts
+      set_fact:
+        streaming_resource_group: "{{ resource_group }}"
+        streaming_vnet: "streaming-vnet"
+        streaming_location: "{{ azure_location }}"
+      delegate_to: localhost
+      delegate_facts: true
+
+    - name: Display infrastructure summary
+      debug:
+        msg:
+          - "Infrastructure deployed successfully!"
+          - "Resource Group: {{ resource_group }}"
+          - "Virtual Network: streaming-vnet ({{ vnet_address_space }})"
+          - "Container Subnet: {{ container_subnet }}"
+          - "Mixer Subnet: {{ mixer_subnet }}"
+          - "Location: {{ azure_location }}" 

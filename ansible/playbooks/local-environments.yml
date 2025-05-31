@@ -1,0 +1,252 @@
+---
+# ============================================================================
+# LOCAL ENVIRONMENT MANAGEMENT - Validation & Remediation
+# ============================================================================
+# Purpose: Ensure local compute environments meet requirements
+# - Check software installations and versions
+# - Validate configurations
+# - Install missing software
+# - Fix incorrect configurations
+# - Support multiple environment types (OBS stations, capture devices, etc.)
+#
+# Usage:
+#   ansible-playbook -i inventories/local playbooks/local-environments.yml
+#   ansible-playbook -i inventories/local playbooks/local-environments.yml --limit obs_stations
+#   ansible-playbook -i inventories/local playbooks/local-environments.yml --tags validation
+# ============================================================================
+
+- name: "Manage Local Compute Environments"
+  hosts: all
+  gather_facts: true
+  vars:
+    # Environment validation settings
+    validation_mode: "{{ validation_mode | default('check_and_fix') }}"  # check_only, check_and_fix, force_install
+    
+    # Common software requirements across environments
+    common_requirements:
+      windows:
+        chocolatey_packages:
+          - firefox
+          - 7zip
+          - notepadplusplus
+        windows_features:
+          - "IIS-WebServerRole"
+        registry_settings:
+          - key: "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings"
+            name: "ProxyEnable"
+            value: 0
+            type: "dword"
+      
+      macos:
+        homebrew_packages:
+          - ffmpeg
+          - git
+        system_settings:
+          - defaults: "com.apple.screensaver askForPassword -int 1"
+      
+      linux:
+        packages:
+          - ffmpeg
+          - git
+          - curl
+          - htop
+        services:
+          - name: ssh
+            state: started
+            enabled: yes
+
+  tasks:
+    # ========================================================================
+    # ENVIRONMENT DETECTION & VALIDATION
+    # ========================================================================
+    - name: Detect local environment type
+      set_fact:
+        environment_type: "{{ group_names | select('match', '^env_.*') | first | default('generic') }}"
+        os_family: "{{ ansible_os_family | lower }}"
+      tags: [always]
+
+    - name: Display environment information
+      debug:
+        msg:
+          - "🖥️  Environment: {{ environment_type }}"
+          - "💻 OS Family: {{ os_family }}"
+          - "📍 Hostname: {{ inventory_hostname }}"
+          - "🔍 Validation Mode: {{ validation_mode }}"
+      tags: [always]
+
+    # ========================================================================
+    # WINDOWS ENVIRONMENT MANAGEMENT
+    # ========================================================================
+    - name: Windows Environment Block
+      block:
+        # Software validation and installation
+        - name: Check if Chocolatey is installed
+          win_stat:
+            path: "C:\\ProgramData\\chocolatey\\bin\\choco.exe"
+          register: chocolatey_check
+          tags: [validation, windows]
+
+        - name: Install Chocolatey if missing
+          win_shell: |
+            Set-ExecutionPolicy Bypass -Scope Process -Force
+            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+            iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+          when: not chocolatey_check.stat.exists and validation_mode != 'check_only'
+          tags: [remediation, windows]
+
+        - name: Check installed Chocolatey packages
+          win_shell: choco list --local-only --exact {{ item }}
+          register: choco_package_check
+          loop: "{{ common_requirements.windows.chocolatey_packages + (env_specific_requirements.windows.chocolatey_packages | default([])) }}"
+          failed_when: false
+          changed_when: false
+          tags: [validation, windows]
+
+        - name: Install missing Chocolatey packages
+          win_chocolatey:
+            name: "{{ item.item }}"
+            state: present
+          when: 
+            - validation_mode != 'check_only'
+            - item.rc != 0
+          loop: "{{ choco_package_check.results }}"
+          tags: [remediation, windows]
+
+        - name: Validate Windows registry settings
+          win_reg_stat:
+            path: "{{ item.key }}"
+            name: "{{ item.name }}"
+          register: registry_check
+          loop: "{{ common_requirements.windows.registry_settings + (env_specific_requirements.windows.registry_settings | default([])) }}"
+          tags: [validation, windows]
+
+        - name: Configure Windows registry settings
+          win_regedit:
+            path: "{{ item.item.key }}"
+            name: "{{ item.item.name }}"
+            data: "{{ item.item.value }}"
+            type: "{{ item.item.type }}"
+          when:
+            - validation_mode != 'check_only'
+            - item.exists and item.value != item.item.value
+          loop: "{{ registry_check.results }}"
+          tags: [remediation, windows]
+
+      when: ansible_os_family == "Windows"
+
+    # ========================================================================
+    # MACOS ENVIRONMENT MANAGEMENT  
+    # ========================================================================
+    - name: macOS Environment Block
+      block:
+        - name: Check if Homebrew is installed
+          stat:
+            path: /opt/homebrew/bin/brew
+          register: homebrew_check
+          tags: [validation, macos]
+
+        - name: Install Homebrew if missing
+          shell: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          when: not homebrew_check.stat.exists and validation_mode != 'check_only'
+          tags: [remediation, macos]
+
+        - name: Check installed Homebrew packages
+          shell: brew list {{ item }}
+          register: brew_package_check
+          loop: "{{ common_requirements.macos.homebrew_packages + (env_specific_requirements.macos.homebrew_packages | default([])) }}"
+          failed_when: false
+          changed_when: false
+          tags: [validation, macos]
+
+        - name: Install missing Homebrew packages
+          homebrew:
+            name: "{{ item.item }}"
+            state: present
+          when:
+            - validation_mode != 'check_only'
+            - item.rc != 0
+          loop: "{{ brew_package_check.results }}"
+          tags: [remediation, macos]
+
+      when: ansible_os_family == "Darwin"
+
+    # ========================================================================
+    # LINUX ENVIRONMENT MANAGEMENT
+    # ========================================================================
+    - name: Linux Environment Block
+      block:
+        - name: Check installed packages (Ubuntu/Debian)
+          package_facts:
+            manager: apt
+          when: ansible_os_family == "Debian"
+          tags: [validation, linux]
+
+        - name: Check installed packages (RHEL/CentOS)
+          package_facts:
+            manager: rpm
+          when: ansible_os_family == "RedHat"
+          tags: [validation, linux]
+
+        - name: Install missing packages
+          package:
+            name: "{{ item }}"
+            state: present
+          loop: "{{ common_requirements.linux.packages + (env_specific_requirements.linux.packages | default([])) }}"
+          when:
+            - validation_mode != 'check_only'
+            - item not in ansible_facts.packages
+          tags: [remediation, linux]
+
+        - name: Ensure services are running
+          service:
+            name: "{{ item.name }}"
+            state: "{{ item.state }}"
+            enabled: "{{ item.enabled }}"
+          loop: "{{ common_requirements.linux.services + (env_specific_requirements.linux.services | default([])) }}"
+          when: validation_mode != 'check_only'
+          tags: [remediation, linux]
+
+      when: ansible_os_family in ["Debian", "RedHat"]
+
+    # ========================================================================
+    # ENVIRONMENT-SPECIFIC CONFIGURATIONS
+    # ========================================================================
+    - name: Apply OBS Station specific configurations
+      include_tasks: "../tasks/obs-station-config.yml"
+      when: 
+        - "'env_obs_station' in group_names"
+        - validation_mode != 'check_only'
+      tags: [remediation, obs_station]
+
+    - name: Apply Audio Workstation specific configurations
+      include_tasks: "../tasks/audio-workstation-config.yml"
+      when:
+        - "'env_audio_workstation' in group_names"
+        - validation_mode != 'check_only'
+      tags: [remediation, audio_workstation]
+
+    - name: Apply Video Capture specific configurations
+      include_tasks: "../tasks/video-capture-config.yml"
+      when:
+        - "'env_video_capture' in group_names"
+        - validation_mode != 'check_only'
+      tags: [remediation, video_capture]
+
+    # ========================================================================
+    # VALIDATION SUMMARY
+    # ========================================================================
+    - name: Generate environment validation report
+      template:
+        src: ../templates/validation-report.html.j2
+        dest: "/tmp/{{ inventory_hostname }}-validation-{{ ansible_date_time.epoch }}.html"
+      delegate_to: localhost
+      tags: [reporting]
+
+    - name: Display validation summary
+      debug:
+        msg:
+          - "✅ Environment validation completed"
+          - "📊 Report: /tmp/{{ inventory_hostname }}-validation-{{ ansible_date_time.epoch }}.html"
+          - "🔄 Mode: {{ validation_mode }}"
+          - "🎯 Environment: {{ environment_type }}"
+      tags: [always] 

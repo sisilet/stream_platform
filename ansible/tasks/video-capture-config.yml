@@ -1,0 +1,74 @@
+---
+# ============================================================================
+# VIDEO CAPTURE SPECIFIC CONFIGURATION TASKS
+# ============================================================================
+# Tasks specific to video capture/processing machines
+# Included by local-environments.yml when env_video_capture group is detected
+
+- name: "📹 Video Capture Configuration"
+  debug:
+    msg: "Configuring Video Capture: {{ inventory_hostname }}"
+
+# macOS Video Capture Configuration
+- name: macOS Video Capture Block
+  block:
+    - name: Install video capture software
+      homebrew:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - ffmpeg
+        - imagemagick
+        - youtube-dl
+
+    - name: Install macOS video applications
+      homebrew_cask:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - obs
+        - vlc
+
+    - name: Check video capture devices
+      shell: |
+        system_profiler SPCameraDataType -json
+      register: macos_video_devices
+
+  when: ansible_os_family == "Darwin"
+
+# Linux Video Capture Configuration
+- name: Linux Video Capture Block
+  block:
+    - name: Install video capture packages
+      package:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - ffmpeg
+        - v4l-utils
+        - cheese
+        - vlc
+
+    - name: Check video devices
+      shell: |
+        if command -v v4l2-ctl >/dev/null 2>&1; then
+          v4l2-ctl --list-devices 2>/dev/null || echo "No video devices found"
+        else
+          echo "Video4Linux tools not installed"
+        fi
+      register: linux_video_devices
+
+  when: ansible_os_family in ["Debian", "RedHat"]
+
+# Performance validation for video capture
+- name: Validate video capture requirements
+  assert:
+    that:
+      - ansible_processor_cores >= 8
+      - ansible_memory_mb.real.total >= 16384
+    fail_msg: "System does not meet minimum requirements for video capture (8 cores, 16GB RAM)"
+    success_msg: "System meets video capture requirements"
+
+- name: Display detected video devices
+  debug:
+    msg: "Video devices detected - check logs for details" 

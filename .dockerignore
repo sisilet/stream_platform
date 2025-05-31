@@ -1,0 +1,52 @@
+# Git files
+.git
+.gitignore
+.github
+
+# Documentation
+README.md
+*.md
+
+# Test files
+tests/
+test-results/
+
+# Build artifacts
+*.log
+*.tmp
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files (except the one we're using)
+Dockerfile*
+!Dockerfile.relay
+docker-compose*.yml
+!docker-compose.yml
+
+# CI/CD files
+.github/
+Makefile
+
+# Temporary files
+tmp/
+temp/
+*.pid
+
+# Node modules (if any)
+node_modules/
+
+# Python cache (if any)
+__pycache__/
+*.pyc
+
+# Logs
+logs/
+*.log 

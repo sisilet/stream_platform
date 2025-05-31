@@ -1,0 +1,67 @@
+---
+# ============================================================================
+# MAIN SITE ORCHESTRATION for On-Demand Streaming System
+# ============================================================================
+# This is the master playbook that orchestrates deployment across compute types:
+# - Infrastructure (networking, security groups, resource groups)
+# - Containers (SRT relay, slide splitter - deploy, configure, validate)
+# - Virtual machines (Windows language mixers - deploy, configure, validate)
+# - Local environments (environment validation and remediation)
+#
+# Usage:
+#   # Cloud deployment
+#   ansible-playbook -i inventories/production site.yml
+#   ansible-playbook -i inventories/production site.yml --tags infrastructure
+#   ansible-playbook -i inventories/production site.yml --extra-vars "event_name=my-event"
+#   
+#   # Local environment management
+#   ansible-playbook -i inventories/local site.yml --tags local_environments
+#   ansible-playbook -i inventories/local/hosts.ini playbooks/local-environments.yml
+# ============================================================================
+
+- name: "Deploy Infrastructure"
+  import_playbook: playbooks/infrastructure.yml
+  tags: [infrastructure, cloud]
+
+- name: "Manage Container Services"
+  import_playbook: playbooks/containers.yml
+  tags: [containers, cloud]
+
+- name: "Manage Virtual Machines"
+  import_playbook: playbooks/virtual-machines.yml
+  tags: [vms, virtual-machines, cloud]
+
+- name: "Manage Local Environments"
+  import_playbook: playbooks/local-environments.yml
+  tags: [local_environments, local]
+
+# ============================================================================
+# Compute types can be managed independently:
+#
+# === CLOUD DEPLOYMENT ===
+# Infrastructure only:
+#   ansible-playbook site.yml --tags infrastructure
+#
+# Containers only (requires infrastructure):
+#   ansible-playbook site.yml --tags containers
+#
+# VMs only (requires infrastructure):
+#   ansible-playbook site.yml --tags vms
+#
+# Full cloud deployment:
+#   ansible-playbook site.yml --tags cloud
+#
+# === LOCAL ENVIRONMENT MANAGEMENT ===
+# All local environments:
+#   ansible-playbook -i inventories/local/hosts.ini site.yml --tags local
+#
+# Specific environment type:
+#   ansible-playbook -i inventories/local/hosts.ini site.yml --limit env_obs_station
+#
+# Validation only (no remediation):
+#   ansible-playbook -i inventories/local/hosts.ini site.yml --tags local --extra-vars "validation_mode=check_only"
+#
+# === TEARDOWN ===
+# Cloud teardown:
+#   ansible-playbook playbooks/teardown.yml
+# ============================================================================ 

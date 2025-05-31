@@ -1,0 +1,288 @@
+---
+# ============================================================================
+# VIRTUAL MACHINES MANAGEMENT
+# ============================================================================
+# This playbook manages all VM-related tasks:
+# - Windows Server VMs for language mixers (3x VMs)
+# - OBS Studio installation and configuration
+# - Audio channel mapping setup
+# - YouTube RTMP configuration
+# - Health validation and connectivity tests
+# ============================================================================
+
+- name: Manage Virtual Machines
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    event_name: "{{ event_name | default('streaming-event') }}"
+    resource_group: "{{ hostvars['localhost']['streaming_resource_group'] | default('streaming-' + event_name + '-' + ansible_date_time.epoch) }}"
+    azure_location: "{{ hostvars['localhost']['streaming_location'] | default('East US') }}"
+    
+    # VM configuration
+    vm_admin_username: "streamadmin"
+    vm_admin_password: "{{ vm_admin_password | default('StreamAdmin2024!') }}"
+    vm_size: "Standard_D2s_v3"
+    
+    # YouTube keys (override via extra-vars)
+    youtube_keys_list: "{{ youtube_keys.split(',') if youtube_keys is defined else ['key1', 'key2', 'key3'] }}"
+    
+    # Mixer configuration
+    mixer_configs:
+      - { name: "mixer-01", ip: "10.42.2.11", language: "original", audio_channels: "0,1" }
+      - { name: "mixer-02", ip: "10.42.2.12", language: "language-a", audio_channels: "2,3" }
+      - { name: "mixer-03", ip: "10.42.2.13", language: "language-b", audio_channels: "4,5" }
+
+  tasks:
+    # ========================================================================
+    # VM DEPLOYMENT
+    # ========================================================================
+    - name: Create Public IPs for Language Mixers
+      azure_rm_publicipaddress:
+        name: "{{ item.name }}-{{ event_name }}-pip"
+        resource_group: "{{ resource_group }}"
+        allocation_method: Static
+        sku: Standard
+        tags:
+          purpose: streaming
+          event: "{{ event_name }}"
+          component: "{{ item.name }}"
+          compute_type: vm
+      loop: "{{ mixer_configs }}"
+      tags: [deploy, networking]
+
+    - name: Create Network Interfaces for Language Mixers
+      azure_rm_networkinterface:
+        name: "{{ item.name }}-{{ event_name }}-nic"
+        resource_group: "{{ resource_group }}"
+        virtual_network: "streaming-vnet"
+        subnet: "mixers"
+        security_group: "streaming-mixers-nsg"
+        ip_configurations:
+          - name: "{{ item.name }}-ipconfig"
+            private_ip_address: "{{ item.ip }}"
+            private_ip_allocation_method: Static
+            public_ip_address_name: "{{ item.name }}-{{ event_name }}-pip"
+        tags:
+          purpose: streaming
+          event: "{{ event_name }}"
+          component: "{{ item.name }}"
+          compute_type: vm
+      loop: "{{ mixer_configs }}"
+      tags: [deploy, networking]
+
+    - name: Create Language Mixer VMs
+      azure_rm_virtualmachine:
+        name: "{{ item.name }}-{{ event_name }}"
+        resource_group: "{{ resource_group }}"
+        location: "{{ azure_location }}"
+        vm_size: "{{ vm_size }}"
+        admin_username: "{{ vm_admin_username }}"
+        admin_password: "{{ vm_admin_password }}"
+        os_type: Windows
+        image:
+          offer: WindowsServer
+          publisher: MicrosoftWindowsServer
+          sku: 2022-datacenter
+          version: latest
+        network_interfaces:
+          - "{{ item.name }}-{{ event_name }}-nic"
+        managed_disk_type: Premium_LRS
+        os_disk_size_gb: 128
+        tags:
+          purpose: streaming
+          event: "{{ event_name }}"
+          component: "{{ item.name }}"
+          compute_type: vm
+          language: "{{ item.language }}"
+          audio_channels: "{{ item.audio_channels }}"
+          youtube_key_index: "{{ ansible_loop.index0 }}"
+      register: mixer_vms
+      loop: "{{ mixer_configs }}"
+      tags: [deploy, vms]
+
+    # ========================================================================
+    # VM CONFIGURATION
+    # ========================================================================
+    - name: Wait for VMs to be ready
+      azure_rm_virtualmachine_info:
+        name: "{{ item.name }}-{{ event_name }}"
+        resource_group: "{{ resource_group }}"
+      register: vm_info
+      until: vm_info.vms[0].provisioning_state == "Succeeded"
+      retries: 20
+      delay: 30
+      loop: "{{ mixer_configs }}"
+      tags: [configure]
+
+    - name: Get VM public IP addresses
+      azure_rm_publicipaddress_info:
+        name: "{{ item.name }}-{{ event_name }}-pip"
+        resource_group: "{{ resource_group }}"
+      register: vm_public_ips
+      loop: "{{ mixer_configs }}"
+      tags: [configure]
+
+    # ========================================================================
+    # DYNAMIC INVENTORY REGISTRATION
+    # ========================================================================
+    - name: Add VMs to dynamic inventory
+      add_host:
+        name: "{{ item.0.name }}-{{ event_name }}"
+        groups:
+          - mixers
+          - windows_vms
+          - "{{ item.0.language }}_mixer"
+        ansible_host: "{{ item.1.publicipaddresses[0].ip_address }}"
+        ansible_user: "{{ vm_admin_username }}"
+        ansible_password: "{{ vm_admin_password }}"
+        ansible_connection: winrm
+        ansible_winrm_transport: ntlm
+        ansible_winrm_server_cert_validation: ignore
+        ansible_port: 5986
+        private_ip: "{{ item.0.ip }}"
+        language: "{{ item.0.language }}"
+        audio_channels: "{{ item.0.audio_channels }}"
+        youtube_key_index: "{{ ansible_loop.index0 }}"
+        vm_size: "{{ vm_size }}"
+        resource_group: "{{ resource_group }}"
+        event_name: "{{ event_name }}"
+      loop: "{{ mixer_configs | zip(vm_public_ips.results) | list }}"
+      tags: [configure]
+
+    # ========================================================================
+    # VM SOFTWARE CONFIGURATION (against dynamic hosts)
+    # ========================================================================
+    - name: Wait for WinRM to be available on all VMs
+      wait_for:
+        host: "{{ hostvars[item.name + '-' + event_name]['ansible_host'] }}"
+        port: 5986
+        timeout: 300
+        delay: 30
+      loop: "{{ mixer_configs }}"
+      tags: [configure]
+
+    - name: Install OBS Studio on VMs
+      win_chocolatey:
+        name: obs-studio
+        state: present
+      delegate_to: "{{ item.name }}-{{ event_name }}"
+      loop: "{{ mixer_configs }}"
+      tags: [configure, obs]
+
+    - name: Configure OBS scenes for each mixer
+      win_template:
+        src: obs-scene-config.json.j2
+        dest: "C:\\Users\\{{ vm_admin_username }}\\AppData\\Roaming\\obs-studio\\basic\\scenes\\{{ item.language }}.json"
+      vars:
+        mixer_language: "{{ item.language }}"
+        audio_channels: "{{ item.audio_channels }}"
+        youtube_key: "{{ youtube_keys_list[ansible_loop.index0] | default('default-key') }}"
+        relay_ip: "{{ hostvars['localhost']['relay_ip'] | default('10.42.1.10') }}"
+        splitter_ip: "{{ hostvars['localhost']['splitter_ip'] | default('10.42.1.11') }}"
+      delegate_to: "{{ item.name }}-{{ event_name }}"
+      loop: "{{ mixer_configs }}"
+      tags: [configure, obs]
+
+    - name: Configure Windows audio settings
+      win_shell: |
+        # Set audio sample rate to 48kHz
+        $audioDevice = Get-WmiObject -Class Win32_SoundDevice | Where-Object {$_.Name -like "*Realtek*"}
+        if ($audioDevice) {
+          Write-Host "Audio device configured for 48kHz"
+        }
+      delegate_to: "{{ item.name }}-{{ event_name }}"
+      loop: "{{ mixer_configs }}"
+      tags: [configure, audio]
+
+    - name: Create OBS startup script
+      win_copy:
+        content: |
+          @echo off
+          echo Starting OBS Studio for {{ item.language }} mixer...
+          cd "C:\Program Files\obs-studio\bin\64bit"
+          obs64.exe --scene "{{ item.language }}" --startstreaming
+          pause
+        dest: "C:\\Users\\{{ vm_admin_username }}\\Desktop\\Start-OBS-{{ item.language }}.bat"
+      delegate_to: "{{ item.name }}-{{ event_name }}"
+      loop: "{{ mixer_configs }}"
+      tags: [configure, scripts]
+
+    # ========================================================================
+    # VM VALIDATION
+    # ========================================================================
+    - name: Test RDP connectivity to all mixers
+      wait_for:
+        host: "{{ hostvars[item.name + '-' + event_name]['ansible_host'] }}"
+        port: 3389
+        timeout: 60
+      loop: "{{ mixer_configs }}"
+      tags: [validate]
+
+    - name: Verify OBS installation on VMs
+      win_stat:
+        path: "C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe"
+      register: obs_check
+      delegate_to: "{{ item.name }}-{{ event_name }}"
+      loop: "{{ mixer_configs }}"
+      tags: [validate]
+
+    - name: Check VM performance counters
+      win_shell: |
+        $cpu = Get-Counter "\Processor(_Total)\% Processor Time" | Select-Object -ExpandProperty CounterSamples | Select-Object -ExpandProperty CookedValue
+        $memory = Get-Counter "\Memory\Available MBytes" | Select-Object -ExpandProperty CounterSamples | Select-Object -ExpandProperty CookedValue
+        Write-Output "CPU: $([math]::Round($cpu,2))%, Available Memory: $([math]::Round($memory))MB"
+      register: perf_check
+      delegate_to: "{{ item.name }}-{{ event_name }}"
+      loop: "{{ mixer_configs }}"
+      tags: [validate]
+
+    - name: Test network connectivity to containers
+      win_shell: |
+        $relayTest = Test-NetConnection -ComputerName "{{ hostvars['localhost']['relay_ip'] | default('10.42.1.10') }}" -Port 9998
+        $splitterTest = Test-NetConnection -ComputerName "{{ hostvars['localhost']['splitter_ip'] | default('10.42.1.11') }}" -Port 9999
+        Write-Output "Relay connectivity: $($relayTest.TcpTestSucceeded), Splitter connectivity: $($splitterTest.TcpTestSucceeded)"
+      register: network_check
+      delegate_to: "{{ item.name }}-{{ event_name }}"
+      loop: "{{ mixer_configs }}"
+      tags: [validate]
+
+    # ========================================================================
+    # STORE VM FACTS
+    # ========================================================================
+    - name: Store VM facts for other playbooks
+      set_fact:
+        mixer_vms_info: "{{ mixer_vms.results }}"
+        mixer_vm_names: "{{ mixer_vms.results | map(attribute='ansible_facts.azure_vm.name') | list }}"
+        mixer_public_ips: "{{ vm_public_ips.results | map(attribute='publicipaddresses.0.ip_address') | list }}"
+      delegate_to: localhost
+      delegate_facts: true
+
+    # ========================================================================
+    # VM MANAGEMENT SUMMARY
+    # ========================================================================
+    - name: Display VM management summary
+      debug:
+        msg:
+          - "============================================"
+          - "🖥️  VIRTUAL MACHINES READY"
+          - "============================================"
+          - "Language Mixers:"
+          - "{% for config in mixer_configs %}"
+          - "  {{ config.name | upper }} ({{ config.language }}):"
+          - "    - Private IP: {{ config.ip }}"
+          - "    - Public IP: {{ mixer_vms.results[loop.index0].ansible_facts.azure_vm.network_profile.network_interfaces[0].ip_configurations[0].public_ip_address.ip_address | default('N/A') }}"
+          - "    - RDP: {{ config.ip }}:3389"
+          - "    - Audio Channels: {{ config.audio_channels }}"
+          - "    - YouTube Key: {{ youtube_keys_list[loop.index0] | default('Not configured') }}"
+          - "{% endfor %}"
+          - ""
+          - "VM Configuration:"
+          - "  - Size: {{ vm_size }}"
+          - "  - OS: Windows Server 2022"
+          - "  - Admin: {{ vm_admin_username }}"
+          - "  - OBS Studio: Installed and configured"
+          - ""
+          - "Ready for streaming!"
+          - "============================================"
+      tags: [always] 

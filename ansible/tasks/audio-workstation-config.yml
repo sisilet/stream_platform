@@ -1,0 +1,220 @@
+---
+# ============================================================================
+# AUDIO WORKSTATION SPECIFIC CONFIGURATION TASKS
+# ============================================================================
+# Tasks specific to audio mixing/mastering workstations
+# Included by local-environments.yml when env_audio_workstation group is detected
+
+- name: "🎵 Audio Workstation Configuration"
+  debug:
+    msg: "Configuring Audio Workstation: {{ inventory_hostname }}"
+
+# Windows Audio Workstation Configuration
+- name: Windows Audio Workstation Block
+  block:
+    - name: Install professional audio software
+      win_chocolatey:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - audacity
+        - reaper
+        - voicemeeter-banana
+        - asio4all
+
+    - name: Configure Windows audio for professional use
+      win_shell: |
+        # Disable Windows audio enhancements
+        $audioKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Audio"
+        New-ItemProperty -Path $audioKey -Name "DisableProtectedAudioDG" -Value 1 -PropertyType DWORD -Force
+        
+        # Set audio service priority to high
+        $serviceKey = "HKLM:\SYSTEM\CurrentControlSet\Services\AudioSrv"
+        Set-ItemProperty -Path $serviceKey -Name "Priority" -Value 1
+        
+        # Configure MMCSS for audio
+        $mmcssKey = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio"
+        New-Item -Path $mmcssKey -Force
+        Set-ItemProperty -Path $mmcssKey -Name "Affinity" -Value 0
+        Set-ItemProperty -Path $mmcssKey -Name "Background Only" -Value "False"
+        Set-ItemProperty -Path $mmcssKey -Name "Priority" -Value 6
+        Set-ItemProperty -Path $mmcssKey -Name "Scheduling Category" -Value "Medium"
+
+    - name: Configure ASIO buffer settings
+      win_copy:
+        content: |
+          [ASIO4ALL v2]
+          BufferSize=128
+          SampleRate=48000
+          BitDepth=24
+          Latency=Low
+        dest: "C:\\Users\\{{ ansible_user }}\\AppData\\Local\\ASIO4ALL\\asio4all.ini"
+
+    - name: Disable Windows audio exclusive mode conflicts
+      win_shell: |
+        # Disable exclusive mode for default playback device
+        $regPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render"
+        Get-ChildItem $regPath | ForEach-Object {
+          $devicePath = "$($_.PSPath)\Properties"
+          Set-ItemProperty -Path $devicePath -Name "{a45c254e-df1c-4efd-8020-67d146a850e0},2" -Value 0 -ErrorAction SilentlyContinue
+        }
+
+    - name: Create audio workstation shortcuts
+      win_copy:
+        content: |
+          @echo off
+          echo Starting Audio Workstation Environment...
+          start "" "C:\Program Files\REAPER\reaper.exe"
+          start "" "C:\Program Files\VB\Voicemeeter\voicemeeterpro.exe"
+          echo Audio environment started!
+          pause
+        dest: "C:\\Users\\{{ ansible_user }}\\Desktop\\Start-Audio-Environment.bat"
+
+  when: ansible_os_family == "Windows"
+
+# macOS Audio Workstation Configuration
+- name: macOS Audio Workstation Block
+  block:
+    - name: Install professional audio software
+      homebrew:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - audacity
+        - ffmpeg
+        - sox
+        - lame
+
+    - name: Install macOS audio applications
+      homebrew_cask:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - reaper
+        - blackhole-2ch
+
+    - name: Configure Core Audio for low latency
+      shell: |
+        # Set audio buffer size
+        sudo defaults write /Library/Preferences/Audio\ MIDI\ Setup com.apple.audio.buffer-size -int 128
+        
+        # Set sample rate to 48kHz
+        sudo defaults write /Library/Preferences/Audio\ MIDI\ Setup com.apple.audio.sample-rate -int 48000
+        
+        # Enable aggregate device capabilities
+        defaults write com.apple.audio.AudioMIDISetup "aggregate device enabled" -bool true
+
+    - name: Create BlackHole audio routing configuration
+      copy:
+        content: |
+          #!/bin/bash
+          # Configure BlackHole for audio routing
+          echo "Setting up BlackHole audio routing..."
+          
+          # This script should be run to setup multi-output device
+          # with BlackHole for professional audio routing
+          open -a "Audio MIDI Setup"
+        dest: "~/Desktop/setup-audio-routing.sh"
+        mode: '0755'
+
+  when: ansible_os_family == "Darwin"
+
+# Linux Audio Workstation Configuration
+- name: Linux Audio Workstation Block
+  block:
+    - name: Install JACK audio system
+      package:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - jackd2
+        - qjackctl
+        - audacity
+        - ffmpeg
+        - sox
+
+    - name: Configure JACK for low-latency audio
+      copy:
+        content: |
+          # JACK configuration for low-latency audio
+          /usr/bin/jackd -R -P75 -dalsa -dhw:0 -r48000 -p128 -n2
+        dest: "/etc/jack/jackdrc"
+        mode: '0644'
+      become: true
+
+    - name: Add user to audio group
+      user:
+        name: "{{ ansible_user }}"
+        groups: audio
+        append: yes
+      become: true
+
+    - name: Configure real-time audio limits
+      copy:
+        content: |
+          @audio   -  rtprio     99
+          @audio   -  memlock    unlimited
+          @audio   -  nice       -19
+        dest: "/etc/security/limits.d/audio.conf"
+        mode: '0644'
+      become: true
+
+  when: ansible_os_family in ["Debian", "RedHat"]
+
+# Audio Hardware Detection and Validation
+- name: Detect audio hardware
+  debug:
+    msg: "Audio interfaces will be detected based on OS"
+
+- name: Windows audio device detection
+  win_shell: |
+    Get-WmiObject -Class Win32_SoundDevice | Select-Object Name, Status | ConvertTo-Json
+  register: windows_audio_devices
+  when: ansible_os_family == "Windows"
+
+- name: macOS audio device detection
+  shell: system_profiler SPAudioDataType -json
+  register: macos_audio_devices
+  when: ansible_os_family == "Darwin"
+
+- name: Linux audio device detection
+  shell: |
+    if command -v aplay >/dev/null 2>&1; then
+      aplay -l 2>/dev/null || echo "No audio devices found"
+    else
+      echo "ALSA tools not installed"
+    fi
+  register: linux_audio_devices
+  when: ansible_os_family in ["Debian", "RedHat"]
+
+- name: Display detected audio devices
+  debug:
+    var: "{{ ansible_os_family | lower }}_audio_devices.stdout"
+  when: ansible_os_family in ["Windows", "Darwin", "Debian", "RedHat"]
+
+# Performance validation for audio workstation
+- name: Validate audio workstation requirements
+  assert:
+    that:
+      - ansible_processor_cores >= 4
+      - ansible_memory_mb.real.total >= 16384
+    fail_msg: "System does not meet minimum requirements for audio workstation (4 cores, 16GB RAM)"
+    success_msg: "System meets audio workstation requirements"
+
+- name: Check disk space for audio projects
+  debug:
+    msg: 
+      - "Available disk space: {{ ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first | default(0) | int / 1024 / 1024 / 1024 | round(2) }} GB"
+  when: ansible_os_family != "Windows"
+
+- name: Windows disk space check
+  win_shell: |
+    $disk = Get-WmiObject -Class Win32_LogicalDisk -Filter "DriveType=3" | Where-Object DeviceID -eq "C:"
+    [math]::Round($disk.FreeSpace / 1GB, 2)
+  register: windows_disk_space
+  when: ansible_os_family == "Windows"
+
+- name: Display Windows disk space
+  debug:
+    msg: "Available C: drive space: {{ windows_disk_space.stdout | trim }} GB"
+  when: ansible_os_family == "Windows" 

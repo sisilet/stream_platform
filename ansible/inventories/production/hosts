@@ -1,0 +1,77 @@
+[local]
+localhost ansible_connection=local
+
+[azure_resources]
+# This group will be populated dynamically during deployment
+# VMs and containers will be added via add_host module
+
+[all:vars]
+# ============================================================================
+# AZURE CONFIGURATION
+# ============================================================================
+azure_location=East US
+azure_subscription_id={{ lookup('env', 'AZURE_SUBSCRIPTION_ID') }}
+azure_tenant_id={{ lookup('env', 'AZURE_TENANT_ID') }}
+azure_client_id={{ lookup('env', 'AZURE_CLIENT_ID') }}
+azure_secret={{ lookup('env', 'AZURE_SECRET') }}
+
+# ============================================================================
+# CONTAINER REGISTRY CONFIGURATION
+# ============================================================================
+# Using GitHub Container Registry instead of ACR for simplicity
+container_registry=ghcr.io
+container_repository={{ lookup('env', 'GITHUB_REPOSITORY') | default('your-org/your-repo') }}
+container_image_tag=latest
+
+# ============================================================================
+# NETWORK CONFIGURATION  
+# ============================================================================
+vnet_address_space=10.42.0.0/16
+container_subnet=10.42.1.0/24
+mixer_subnet=10.42.2.0/24
+
+# ============================================================================
+# VM CONFIGURATION
+# ============================================================================
+vm_admin_username=streamadmin
+vm_size=Standard_D2s_v3
+vm_os_type=Windows Server 2022
+
+# Windows VM connection settings (will be set dynamically)
+ansible_user={{ vm_admin_username }}
+ansible_password={{ vm_admin_password | default('') }}
+ansible_connection=winrm
+ansible_winrm_transport=ntlm
+ansible_winrm_server_cert_validation=ignore
+ansible_port=5986
+
+# ============================================================================
+# CONTAINER CONFIGURATION
+# ============================================================================
+relay_cpu=2
+relay_memory=4
+splitter_cpu=1
+splitter_memory=2
+
+# Container images (will use GitHub Container Registry)
+srt_relay_image={{ container_registry }}/{{ container_repository }}/srt-relay:{{ container_image_tag }}
+slide_splitter_image={{ container_registry }}/{{ container_repository }}/slide-splitter:{{ container_image_tag }}
+
+# ============================================================================
+# DEPLOYMENT SETTINGS
+# ============================================================================
+cleanup_on_failure=true
+deployment_timeout=1800
+force_delete=false
+
+# Event configuration (override via extra-vars)
+event_name=streaming-event
+youtube_keys=""
+
+# ============================================================================
+# DYNAMIC INVENTORY SETTINGS
+# ============================================================================
+# These settings help with dynamic resource discovery
+resource_group_pattern=streaming-{{ event_name }}-*
+vm_tag_filter=purpose=streaming,component=mixer
+container_tag_filter=purpose=streaming,component=container 

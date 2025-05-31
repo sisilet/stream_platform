@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Streaming System Control Panel</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+        
+        .main-content {
+            padding: 40px;
+        }
+        
+        .control-panel {
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .control-panel h2 {
+            color: #2c3e50;
+            margin-bottom: 25px;
+            font-size: 1.8em;
+        }
+        
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group.full-width {
+            grid-column: 1 / -1;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+        
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 160px;
+            justify-content: center;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        
+        .btn:active {
+            transform: translateY(0);
+        }
+        
+        .btn-deploy {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+        }
+        
+        .btn-status {
+            background: linear-gradient(135deg, #17a2b8 0%, #6f42c1 100%);
+            color: white;
+        }
+        
+        .btn-teardown {
+            background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%);
+            color: white;
+        }
+        
+        .status-panel {
+            background: white;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            overflow: hidden;
+        }
+        
+        .status-panel h3 {
+            background: #f8f9fa;
+            padding: 20px;
+            margin: 0;
+            color: #2c3e50;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .status-content {
+            padding: 20px;
+        }
+        
+        .log-output {
+            background: #1a1a1a;
+            color: #00ff00;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            height: 400px;
+            overflow-y: auto;
+            font-size: 14px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .status-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .status-card h4 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .status-card p {
+            color: #6c757d;
+            margin-bottom: 5px;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .alert-warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        
+        @media (max-width: 768px) {
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .button-group {
+                flex-direction: column;
+            }
+            
+            .btn {
+                min-width: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎥 Streaming System Control Panel</h1>
+            <p>One-click deployment and management for multilingual live streaming events</p>
+        </div>
+        
+        <div class="main-content">
+            <div class="control-panel">
+                <h2>Event Configuration</h2>
+                
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="event-name">Event Name:</label>
+                        <input type="text" id="event-name" placeholder="e.g., Conference-2025">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="environment">Environment:</label>
+                        <select id="environment">
+                            <option value="production">Production</option>
+                            <option value="staging">Staging</option>
+                            <option value="development">Development</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label for="youtube-keys">YouTube Stream Keys (comma-separated):</label>
+                        <input type="text" id="youtube-keys" placeholder="original-key,spanish-key,french-key">
+                    </div>
+                </div>
+                
+                <div class="button-group">
+                    <button class="btn btn-deploy" onclick="deploySystem()">
+                        <span>🚀</span> Deploy System
+                    </button>
+                    <button class="btn btn-status" onclick="checkStatus()">
+                        <span>📊</span> Check Status
+                    </button>
+                    <button class="btn btn-teardown" onclick="teardownSystem()">
+                        <span>🗑️</span> Teardown System
+                    </button>
+                </div>
+            </div>
+            
+            <div class="status-panel">
+                <h3>System Status</h3>
+                <div class="status-content">
+                    <div id="status-display">
+                        <p>No active deployments found. Deploy a system to see status information.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="status-panel">
+                <h3>Deployment Log</h3>
+                <div class="status-content">
+                    <div class="log-output" id="log-output">Ready for deployment...
+
+Welcome to the Streaming System Control Panel!
+
+This interface allows you to:
+• Deploy complete streaming infrastructure in 10-15 minutes
+• Monitor system health and connectivity
+• Teardown resources when events are complete
+
+To get started:
+1. Enter your event name
+2. Provide YouTube stream keys for each language
+3. Click "Deploy System" to begin
+
+The system will create:
+• SRT Relay for audio/video distribution
+• Slide Splitter for presentation content
+• 3 Language Mixer VMs (Original, Spanish, French)
+• Complete network infrastructure in Azure
+
+All resources are automatically tagged for easy cleanup.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let deploymentInProgress = false;
+        
+        function deploySystem() {
+            const eventName = document.getElementById('event-name').value.trim();
+            const environment = document.getElementById('environment').value;
+            const youtubeKeys = document.getElementById('youtube-keys').value.trim();
+            
+            if (!eventName) {
+                showAlert('Please enter an event name', 'error');
+                return;
+            }
+            
+            if (!youtubeKeys) {
+                showAlert('Please enter YouTube stream keys', 'error');
+                return;
+            }
+            
+            const keyCount = youtubeKeys.split(',').length;
+            if (keyCount !== 3) {
+                showAlert(`Please provide exactly 3 YouTube keys (found ${keyCount})`, 'error');
+                return;
+            }
+            
+            if (deploymentInProgress) {
+                showAlert('Deployment already in progress', 'warning');
+                return;
+            }
+            
+            deploymentInProgress = true;
+            updateButtonStates(true);
+            
+            logMessage('🚀 Starting deployment...');
+            logMessage(`Event: ${eventName}`);
+            logMessage(`Environment: ${environment}`);
+            logMessage(`YouTube Keys: ${keyCount} provided`);
+            logMessage('');
+            
+            // Simulate deployment process
+            simulateDeployment(eventName, environment, youtubeKeys);
+        }
+        
+        function checkStatus() {
+            const eventName = document.getElementById('event-name').value.trim();
+            
+            if (!eventName) {
+                showAlert('Please enter an event name to check status', 'error');
+                return;
+            }
+            
+            logMessage('📊 Checking system status...');
+            logMessage(`Event: ${eventName}`);
+            
+            // Simulate status check
+            setTimeout(() => {
+                updateStatusDisplay({
+                    active: false,
+                    eventName: eventName,
+                    message: 'No active deployments found for this event'
+                });
+                logMessage('No active deployments found');
+            }, 1000);
+        }
+        
+        function teardownSystem() {
+            const eventName = document.getElementById('event-name').value.trim();
+            
+            if (!eventName) {
+                showAlert('Please enter an event name to teardown', 'error');
+                return;
+            }
+            
+            if (!confirm(`Are you sure you want to teardown all resources for "${eventName}"?\n\nThis action cannot be undone.`)) {
+                return;
+            }
+            
+            logMessage('🗑️ Starting teardown...');
+            logMessage(`Event: ${eventName}`);
+            
+            // Simulate teardown
+            setTimeout(() => {
+                logMessage('✅ Teardown initiated successfully');
+                logMessage('🕐 Resources will be deleted in the background');
+                updateStatusDisplay({
+                    active: false,
+                    eventName: eventName,
+                    message: 'Teardown in progress'
+                });
+                showAlert('Teardown initiated successfully', 'success');
+            }, 2000);
+        }
+        
+        function simulateDeployment(eventName, environment, youtubeKeys) {
+            const phases = [
+                { name: '📦 Phase 1: Infrastructure', duration: 5000 },
+                { name: '🐳 Phase 2: Containers', duration: 3000 },
+                { name: '🖥️ Phase 3: Virtual Machines', duration: 4000 },
+                { name: '🔧 Phase 4: Configuration', duration: 3000 },
+                { name: '🔍 Phase 5: Health Checks', duration: 2000 }
+            ];
+            
+            let currentPhase = 0;
+            
+            function runPhase() {
+                if (currentPhase >= phases.length) {
+                    // Deployment complete
+                    logMessage('✅ Deployment completed successfully!');
+                    logMessage('⏱️ Total deployment time: 17 seconds (simulated)');
+                    logMessage('');
+                    logMessage('🎉 Streaming System Ready!');
+                    logMessage('');
+                    logMessage('📡 Connection Information:');
+                    logMessage('  SRT Relay: srt://20.123.45.67:9998');
+                    logMessage('  Slide Splitter: srt://20.123.45.68:9999');
+                    logMessage('');
+                    logMessage('🖥️ Language Mixers:');
+                    logMessage('  Original: 20.123.45.69 (RDP: 3389)');
+                    logMessage('  Spanish: 20.123.45.70 (RDP: 3389)');
+                    logMessage('  French: 20.123.45.71 (RDP: 3389)');
+                    
+                    updateStatusDisplay({
+                        active: true,
+                        eventName: eventName,
+                        containers: ['srt-relay', 'slide-splitter'],
+                        vms: ['mixer-original', 'mixer-spanish', 'mixer-french'],
+                        health: 'All systems operational',
+                        srtRelayIP: '20.123.45.67',
+                        slideSplitterIP: '20.123.45.68'
+                    });
+                    
+                    deploymentInProgress = false;
+                    updateButtonStates(false);
+                    showAlert('Deployment completed successfully!', 'success');
+                    return;
+                }
+                
+                const phase = phases[currentPhase];
+                logMessage(`${phase.name}...`);
+                
+                setTimeout(() => {
+                    logMessage(`${phase.name} completed`);
+                    currentPhase++;
+                    runPhase();
+                }, phase.duration);
+            }
+            
+            runPhase();
+        }
+        
+        function updateStatusDisplay(status) {
+            const statusDisplay = document.getElementById('status-display');
+            
+            if (status.active) {
+                statusDisplay.innerHTML = `
+                    <div class="status-grid">
+                        <div class="status-card">
+                            <h4>🎯 Active Deployment</h4>
+                            <p><strong>Event:</strong> ${status.eventName}</p>
+                            <p><strong>Status:</strong> ${status.health}</p>
+                            <p><strong>Components:</strong> ${status.containers.length + status.vms.length} running</p>
+                        </div>
+                        
+                        <div class="status-card">
+                            <h4>📡 Connection Endpoints</h4>
+                            <p><strong>SRT Relay:</strong> srt://${status.srtRelayIP}:9998</p>
+                            <p><strong>Slide Splitter:</strong> srt://${status.slideSplitterIP}:9999</p>
+                        </div>
+                        
+                        <div class="status-card">
+                            <h4>🐳 Containers</h4>
+                            ${status.containers.map(c => `<p>✅ ${c}</p>`).join('')}
+                        </div>
+                        
+                        <div class="status-card">
+                            <h4>🖥️ Virtual Machines</h4>
+                            ${status.vms.map(vm => `<p>✅ ${vm}</p>`).join('')}
+                        </div>
+                    </div>
+                `;
+            } else {
+                statusDisplay.innerHTML = `<p>${status.message || 'No active deployments found'}</p>`;
+            }
+        }
+        
+        function updateButtonStates(disabled) {
+            const buttons = document.querySelectorAll('.btn');
+            buttons.forEach(btn => {
+                btn.disabled = disabled;
+                if (disabled) {
+                    btn.style.opacity = '0.6';
+                    btn.style.cursor = 'not-allowed';
+                } else {
+                    btn.style.opacity = '1';
+                    btn.style.cursor = 'pointer';
+                }
+            });
+        }
+        
+        function logMessage(message) {
+            const logOutput = document.getElementById('log-output');
+            const timestamp = new Date().toLocaleTimeString();
+            logOutput.textContent += `[${timestamp}] ${message}\n`;
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+        
+        function showAlert(message, type) {
+            // Remove existing alerts
+            const existingAlerts = document.querySelectorAll('.alert');
+            existingAlerts.forEach(alert => alert.remove());
+            
+            // Create new alert
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            
+            // Insert at top of main content
+            const mainContent = document.querySelector('.main-content');
+            mainContent.insertBefore(alert, mainContent.firstChild);
+            
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+        
+        // Initialize with sample data
+        document.getElementById('event-name').value = 'Conference-2025';
+        document.getElementById('youtube-keys').value = 'sample-key-1,sample-key-2,sample-key-3';
+    </script>
+</body>
+</html> 
