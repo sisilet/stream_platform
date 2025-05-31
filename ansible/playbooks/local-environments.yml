@@ -252,7 +252,7 @@
     # ========================================================================
     - name: Generate environment validation report
       ansible.builtin.template:
-        src: ../templates/validation-report.html.j2
+        src: "{{ playbook_dir }}/../templates/validation-report.html.j2"
         dest: "/tmp/{{ inventory_hostname }}-validation-{{ ansible_date_time.epoch }}.html"
         mode: '0644'
       delegate_to: localhost

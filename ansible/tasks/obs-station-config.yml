@@ -6,33 +6,35 @@
 # Included by local-environments.yml when env_obs_station group is detected
 
 - name: "🎬 OBS Station Configuration"
-  debug:
+  ansible.builtin.debug:
     msg: "Configuring OBS Station: {{ inventory_hostname }}"
 
 # Windows OBS Station Configuration
 - name: Windows OBS Station Block
+  when: ansible_os_family == "Windows"
   block:
     - name: Check OBS Studio installation directory
-      win_stat:
+      ansible.windows.win_stat:
         path: "C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe"
       register: obs_exe_check
 
     - name: Validate OBS Studio version
-      win_shell: |
+      ansible.windows.win_shell: |
         $version = (Get-ItemProperty \
           "C:\Program Files\obs-studio\bin\64bit\obs64.exe"
         ).VersionInfo.FileVersion
         Write-Output $version
       register: obs_version_check
       when: obs_exe_check.stat.exists
+      changed_when: false
 
     - name: Create OBS Studio profile directory
-      win_file:
+      ansible.windows.win_file:
         path: "C:\\Users\\{{ ansible_user }}\\AppData\\Roaming\\obs-studio\\basic\\profiles\\Streaming"
         state: directory
 
     - name: Configure OBS Studio basic settings
-      win_copy:
+      ansible.windows.win_copy:
         content: |
           [General]
           Name=Streaming
@@ -61,7 +63,7 @@
         dest: "C:\\Users\\{{ ansible_user }}\\AppData\\Roaming\\obs-studio\\basic\\profiles\\Streaming\\basic.ini"
 
     - name: Configure Windows audio for low-latency
-      win_shell: |
+      ansible.windows.win_shell: |
         # Set audio buffer size for low latency
         $audioKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Audio"
         New-ItemProperty -Path $audioKey -Name "DisableProtectedAudioDG" \
@@ -70,14 +72,15 @@
         # Set multimedia class scheduler for audio
         $mmcssKey = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"
         Set-ItemProperty -Path $mmcssKey -Name "SystemResponsiveness" -Value 1
+      changed_when: true
 
     - name: Install VoiceMeeter for audio routing
-      win_chocolatey:
+      chocolatey.chocolatey.win_chocolatey:
         name: voicemeeter
         state: present
 
     - name: Create OBS startup script
-      win_copy:
+      ansible.windows.win_copy:
         content: |
           @echo off
           echo Starting OBS Studio for {{ inventory_hostname }}...
@@ -87,7 +90,7 @@
         dest: "C:\\Users\\{{ ansible_user }}\\Desktop\\Start-OBS.bat"
 
     - name: Configure Windows firewall for OBS
-      win_firewall_rule:
+      community.windows.win_firewall_rule:
         name: "OBS Studio"
         localport: "1935,8080"
         action: allow
@@ -95,49 +98,47 @@
         protocol: tcp
         state: present
 
-  when: ansible_os_family == "Windows"
-
 # macOS OBS Station Configuration
-- name: macOS OBS Station Block
+- name: MacOS OBS Station Block
+  when: ansible_os_family == "Darwin"
   block:
     - name: Check OBS installation
-      stat:
+      ansible.builtin.stat:
         path: "/Applications/OBS.app/Contents/MacOS/OBS"
       register: obs_macos_check
 
     - name: Install OBS via Homebrew
-      homebrew_cask:
+      community.general.homebrew_cask:
         name: obs
         state: present
       when: not obs_macos_check.stat.exists
 
     - name: Configure OBS profiles directory
-      file:
+      ansible.builtin.file:
         path: "~/Library/Application Support/obs-studio/basic/profiles/Streaming"
         state: directory
         mode: '0755'
 
     - name: Set macOS audio preferences for OBS
-      shell: |
+      ansible.builtin.shell: |
         # Set audio sample rate to 48kHz
         sudo defaults write /Library/Preferences/Audio\ MIDI\ Setup \
           com.apple.audio.aggregate.sample-rate -int 48000
 
         # Enable exclusive mode for audio devices
         defaults write com.apple.coreaudio "Exclusive Mode" -bool true
-
-  when: ansible_os_family == "Darwin"
+      changed_when: true
 
 # Performance validation
 - name: Check system performance for OBS
-  debug:
+  ansible.builtin.debug:
     msg:
       - "CPU Cores: {{ ansible_processor_cores }}"
       - "RAM: {{ ansible_memory_mb.real.total }} MB"
       - "Free RAM: {{ ansible_memory_mb.real.free }} MB"
 
 - name: Validate minimum requirements for OBS
-  assert:
+  ansible.builtin.assert:
     that:
       - ansible_processor_cores >= 4
       - ansible_memory_mb.real.total >= 8192
@@ -145,7 +146,7 @@
     success_msg: "System meets OBS requirements"
 
 - name: Test network connectivity for streaming
-  uri:
+  ansible.builtin.uri:
     url: "https://ingest.rtmp.youtube.com"
     method: HEAD
     timeout: 10
@@ -153,7 +154,7 @@
   failed_when: false
 
 - name: Display network test results
-  debug:
+  ansible.builtin.debug:
     msg:
       - "YouTube RTMP connectivity: {{ 'OK' if youtube_connectivity.status == 200 else 'FAILED' }}"
       - "Response time: {{ youtube_connectivity.elapsed if youtube_connectivity.elapsed is defined else 'N/A' }}s"

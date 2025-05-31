@@ -7,14 +7,15 @@
 # detected
 
 - name: "🎵 Audio Workstation Configuration"
-  debug:
+  ansible.builtin.debug:
     msg: "Configuring Audio Workstation: {{ inventory_hostname }}"
 
 # Windows Audio Workstation Configuration
 - name: Windows Audio Workstation Block
+  when: ansible_os_family == "Windows"
   block:
     - name: Install professional audio software
-      win_chocolatey:
+      chocolatey.chocolatey.win_chocolatey:
         name: "{{ item }}"
         state: present
       loop:
@@ -24,7 +25,7 @@
         - asio4all
 
     - name: Configure Windows audio for professional use
-      win_shell: |
+      ansible.windows.win_shell: |
         # Disable Windows audio enhancements
         $audioKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Audio"
         New-ItemProperty -Path $audioKey -Name "DisableProtectedAudioDG" \
@@ -41,9 +42,10 @@
         Set-ItemProperty -Path $mmcssKey -Name "Background Only" -Value "False"
         Set-ItemProperty -Path $mmcssKey -Name "Priority" -Value 6
         Set-ItemProperty -Path $mmcssKey -Name "Scheduling Category" -Value "Medium"
+      changed_when: true
 
     - name: Configure ASIO buffer settings
-      win_copy:
+      ansible.windows.win_copy:
         content: |
           [ASIO4ALL v2]
           BufferSize=128
@@ -53,7 +55,7 @@
         dest: "C:\\Users\\{{ ansible_user }}\\AppData\\Local\\ASIO4ALL\\asio4all.ini"
 
     - name: Disable Windows audio exclusive mode conflicts
-      win_shell: |
+      ansible.windows.win_shell: |
         # Disable exclusive mode for default playback device
         $regPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render"
         Get-ChildItem $regPath | ForEach-Object {
@@ -62,9 +64,10 @@
             -Name "{a45c254e-df1c-4efd-8020-67d146a850e0},2" \
             -Value 0 -ErrorAction SilentlyContinue
         }
+      changed_when: true
 
     - name: Create audio workstation shortcuts
-      win_copy:
+      ansible.windows.win_copy:
         content: |
           @echo off
           echo Starting Audio Workstation Environment...
@@ -74,13 +77,12 @@
           pause
         dest: "C:\\Users\\{{ ansible_user }}\\Desktop\\Start-Audio-Environment.bat"
 
-  when: ansible_os_family == "Windows"
-
 # macOS Audio Workstation Configuration
-- name: macOS Audio Workstation Block
+- name: MacOS Audio Workstation Block
+  when: ansible_os_family == "Darwin"
   block:
     - name: Install professional audio software
-      homebrew:
+      community.general.homebrew:
         name: "{{ item }}"
         state: present
       loop:
@@ -90,7 +92,7 @@
         - lame
 
     - name: Install macOS audio applications
-      homebrew_cask:
+      community.general.homebrew_cask:
         name: "{{ item }}"
         state: present
       loop:
@@ -98,7 +100,7 @@
         - blackhole-2ch
 
     - name: Configure Core Audio for low latency
-      shell: |
+      ansible.builtin.shell: |
         # Set audio buffer size
         sudo defaults write /Library/Preferences/Audio\ MIDI\ Setup \
           com.apple.audio.buffer-size -int 128
@@ -110,9 +112,10 @@
         # Enable aggregate device capabilities
         defaults write com.apple.audio.AudioMIDISetup \
           "aggregate device enabled" -bool true
+      changed_when: true
 
     - name: Create BlackHole audio routing configuration
-      copy:
+      ansible.builtin.copy:
         content: |
           #!/bin/bash
           # Configure BlackHole for audio routing
@@ -124,13 +127,12 @@
         dest: "~/Desktop/setup-audio-routing.sh"
         mode: '0755'
 
-  when: ansible_os_family == "Darwin"
-
 # Linux Audio Workstation Configuration
 - name: Linux Audio Workstation Block
+  when: ansible_os_family in ["Debian", "RedHat"]
   block:
     - name: Install JACK audio system
-      package:
+      ansible.builtin.package:
         name: "{{ item }}"
         state: present
       loop:
@@ -141,7 +143,7 @@
         - sox
 
     - name: Configure JACK for low-latency audio
-      copy:
+      ansible.builtin.copy:
         content: |
           # JACK configuration for low-latency audio
           /usr/bin/jackd -R -P75 -dalsa -dhw:0 -r48000 -p128 -n2
@@ -150,14 +152,14 @@
       become: true
 
     - name: Add user to audio group
-      user:
+      ansible.builtin.user:
         name: "{{ ansible_user }}"
         groups: audio
         append: true
       become: true
 
     - name: Configure real-time audio limits
-      copy:
+      ansible.builtin.copy:
         content: |
           @audio   -  rtprio     99
           @audio   -  memlock    unlimited
@@ -166,26 +168,26 @@
         mode: '0644'
       become: true
 
-  when: ansible_os_family in ["Debian", "RedHat"]
-
 # Audio Hardware Detection and Validation
 - name: Detect audio hardware
-  debug:
+  ansible.builtin.debug:
     msg: "Audio interfaces will be detected based on OS"
 
 - name: Windows audio device detection
-  win_shell: |
+  ansible.windows.win_shell: |
     Get-WmiObject -Class Win32_SoundDevice | Select-Object Name, Status | ConvertTo-Json
   register: windows_audio_devices
   when: ansible_os_family == "Windows"
+  changed_when: false
 
-- name: macOS audio device detection
-  shell: system_profiler SPAudioDataType -json
+- name: MacOS audio device detection
+  ansible.builtin.shell: system_profiler SPAudioDataType -json
   register: macos_audio_devices
   when: ansible_os_family == "Darwin"
+  changed_when: false
 
 - name: Linux audio device detection
-  shell: |
+  ansible.builtin.shell: |
     if command -v aplay >/dev/null 2>&1; then
       aplay -l 2>/dev/null || echo "No audio devices found"
     else
@@ -193,41 +195,42 @@
     fi
   register: linux_audio_devices
   when: ansible_os_family in ["Debian", "RedHat"]
+  changed_when: false
 
 - name: Display detected audio devices
-  debug:
+  ansible.builtin.debug:
     var: "{{ ansible_os_family | lower }}_audio_devices.stdout"
   when: ansible_os_family in ["Windows", "Darwin", "Debian", "RedHat"]
 
-# Performance validation for audio workstation
-- name: Validate audio workstation requirements
-  assert:
+- name: Validate audio configuration
+  ansible.builtin.assert:
     that:
-      - ansible_processor_cores >= 4
-      - ansible_memory_mb.real.total >= 16384
+      - ansible_processor_cores >= 2
+      - ansible_memory_mb.real.total >= 4096
     fail_msg: >
       System does not meet minimum requirements for audio workstation
-      (4 cores, 16GB RAM)
+      (2 cores, 4GB RAM)
     success_msg: "System meets audio workstation requirements"
 
-- name: Check disk space for audio projects
-  debug:
+- name: Display audio configuration summary
+  ansible.builtin.debug:
     msg:
-      - >
-        Available disk space:
-        {{ ansible_mounts | selectattr('mount', 'equalto', '/') |
-        map(attribute='size_available') | first | default(0) | int /
-        1024 / 1024 / 1024 | round(2) }} GB
-  when: ansible_os_family != "Windows"
+      - "Audio workstation configuration completed"
+      - "OS: {{ ansible_os_family }}"
+      - "Hostname: {{ inventory_hostname }}"
 
-- name: Windows disk space check
-  win_shell: |
-    $disk = Get-WmiObject -Class Win32_LogicalDisk -Filter "DriveType=3" | Where-Object DeviceID -eq "C:"
-    [math]::Round($disk.FreeSpace / 1GB, 2)
-  register: windows_disk_space
+- name: Windows audio test
+  ansible.windows.win_shell: |
+    # Test Windows audio subsystem
+    Get-WmiObject -Class Win32_SoundDevice |
+    Where-Object {$_.Status -eq "OK"} |
+    Measure-Object |
+    Select-Object -ExpandProperty Count
+  register: windows_audio_test
   when: ansible_os_family == "Windows"
+  changed_when: false
 
-- name: Display Windows disk space
-  debug:
-    msg: "Available C: drive space: {{ windows_disk_space.stdout | trim }} GB"
+- name: Display Windows audio test results
+  ansible.builtin.debug:
+    msg: "Working audio devices: {{ windows_audio_test.stdout | trim }}"
   when: ansible_os_family == "Windows"

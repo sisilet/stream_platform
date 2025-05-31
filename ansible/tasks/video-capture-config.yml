@@ -6,14 +6,15 @@
 # Included by local-environments.yml when env_video_capture group is detected
 
 - name: "📹 Video Capture Configuration"
-  debug:
+  ansible.builtin.debug:
     msg: "Configuring Video Capture: {{ inventory_hostname }}"
 
 # macOS Video Capture Configuration
-- name: macOS Video Capture Block
+- name: MacOS Video Capture Block
+  when: ansible_os_family == "Darwin"
   block:
     - name: Install video capture software
-      homebrew:
+      community.general.homebrew:
         name: "{{ item }}"
         state: present
       loop:
@@ -22,7 +23,7 @@
         - youtube-dl
 
     - name: Install macOS video applications
-      homebrew_cask:
+      community.general.homebrew_cask:
         name: "{{ item }}"
         state: present
       loop:
@@ -30,17 +31,16 @@
         - vlc
 
     - name: Check video capture devices
-      shell: |
-        system_profiler SPCameraDataType -json
+      ansible.builtin.command: system_profiler SPCameraDataType -json
       register: macos_video_devices
-
-  when: ansible_os_family == "Darwin"
+      changed_when: false
 
 # Linux Video Capture Configuration
 - name: Linux Video Capture Block
+  when: ansible_os_family in ["Debian", "RedHat"]
   block:
     - name: Install video capture packages
-      package:
+      ansible.builtin.package:
         name: "{{ item }}"
         state: present
       loop:
@@ -50,19 +50,18 @@
         - vlc
 
     - name: Check video devices
-      shell: |
+      ansible.builtin.shell: |
         if command -v v4l2-ctl >/dev/null 2>&1; then
           v4l2-ctl --list-devices 2>/dev/null || echo "No video devices found"
         else
           echo "Video4Linux tools not installed"
         fi
       register: linux_video_devices
-
-  when: ansible_os_family in ["Debian", "RedHat"]
+      changed_when: false
 
 # Performance validation for video capture
 - name: Validate video capture requirements
-  assert:
+  ansible.builtin.assert:
     that:
       - ansible_processor_cores >= 8
       - ansible_memory_mb.real.total >= 16384
@@ -72,5 +71,5 @@
     success_msg: "System meets video capture requirements"
 
 - name: Display detected video devices
-  debug:
+  ansible.builtin.debug:
     msg: "Video devices detected - check logs for details"

@@ -100,14 +100,14 @@
     # CONTAINER CONFIGURATION
     # ========================================================================
     - name: Configure container firewall rules
-      debug:
+      ansible.builtin.debug:
         msg: >
           Container firewall rules configured via Azure Container Instance
           security
       tags: [configure]
 
     - name: Set container resource limits
-      debug:
+      ansible.builtin.debug:
         msg: >
           Container resources: Relay({{ relay_cpu }}CPU/{{ relay_memory }}GB),
           Splitter({{ splitter_cpu }}CPU/{{ splitter_memory }}GB)
