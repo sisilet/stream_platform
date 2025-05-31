@@ -32,7 +32,7 @@ jobs:
         pip install ansible ansible-lint yamllint
 
     - name: Run yamllint
-      run: yamllint ansible/
+      run: yamllint -c ansible/.yamllint.yml ansible/
 
     - name: Run ansible-lint
       run: ansible-lint ansible/

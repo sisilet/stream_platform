@@ -1,0 +1,2 @@
+# This file ensures the templates directory is preserved in git
+# Template files for Ansible configurations will be stored here 

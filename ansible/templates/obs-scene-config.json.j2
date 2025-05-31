@@ -1,0 +1,57 @@
+{
+  "current_scene": "{{ mixer_language | title }} Stream",
+  "current_program_scene": "{{ mixer_language | title }} Stream",
+  "scenes": [
+    {
+      "name": "{{ mixer_language | title }} Stream",
+      "sources": [
+        {
+          "name": "SRT Input",
+          "type": "ffmpeg_source",
+          "settings": {
+            "input": "srt://{{ relay_ip }}:9998?streamid={{ mixer_language }}",
+            "input_format": "",
+            "reconnect": true,
+            "restart_on_activate": true
+          }
+        },
+        {
+          "name": "Audio Input",
+          "type": "wasapi_input_capture",
+          "settings": {
+            "device_id": "default",
+            "use_device_timing": false
+          }
+        }
+      ],
+      "transitions": []
+    }
+  ],
+  "sources": [],
+  "transitions": [
+    {
+      "name": "Fade",
+      "type": "fade_transition",
+      "settings": {}
+    }
+  ],
+  "version": 1.0,
+  "streaming": {
+    "service": "YouTube - RTMPS",
+    "settings": {
+      "server": "rtmp://a.rtmp.youtube.com/live2",
+      "key": "{{ youtube_key }}",
+      "audio_bitrate": 160,
+      "video_bitrate": 6000,
+      "output_width": 1920,
+      "output_height": 1080,
+      "fps": 30
+    }
+  },
+  "recording": {
+    "enabled": false
+  },
+  "audio_monitoring": {
+    "channels": "{{ audio_channels }}"
+  }
+} 
