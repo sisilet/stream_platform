@@ -5,7 +5,8 @@
   gather_facts: true
   vars:
     event_name: "{{ event_name | default('streaming-event') }}"
-    resource_group: "{{ resource_group | default('streaming-' + event_name + '-*') }}"
+    resource_group: >
+      {{ resource_group | default('streaming-' + event_name + '-*') }}
     
   tasks:
     - name: Find resource groups for event
@@ -21,7 +22,9 @@
 
     - name: Filter streaming resource groups
       set_fact:
-        target_rgs: "{{ all_rgs.resourcegroups | selectattr('name', 'match', '^streaming-.*') | list }}"
+        target_rgs: >
+          {{ all_rgs.resourcegroups |
+          selectattr('name', 'match', '^streaming-.*') | list }}
       when: "'*' in resource_group"
 
     - name: Set target resource groups
@@ -37,7 +40,9 @@
 
     - name: Confirm deletion
       pause:
-        prompt: "Are you sure you want to delete these resource groups? Type 'yes' to continue"
+        prompt: >
+          Are you sure you want to delete these resource groups?
+          Type 'yes' to continue
       register: confirmation
       when: not (force_delete | default(false))
 
@@ -47,9 +52,11 @@
         state: absent
         force_delete_nonempty: true
       loop: "{{ target_rgs }}"
-      when: 
+      when:
         - target_rgs is defined
-        - (force_delete | default(false)) or (confirmation.user_input | default('') == 'yes')
+        - >
+          (force_delete | default(false)) or
+          (confirmation.user_input | default('') == 'yes')
 
     - name: Display teardown summary
       debug:

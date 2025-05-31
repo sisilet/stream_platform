@@ -3,7 +3,8 @@
 # AUDIO WORKSTATION SPECIFIC CONFIGURATION TASKS
 # ============================================================================
 # Tasks specific to audio mixing/mastering workstations
-# Included by local-environments.yml when env_audio_workstation group is detected
+# Included by local-environments.yml when env_audio_workstation group is
+# detected
 
 - name: "🎵 Audio Workstation Configuration"
   debug:
@@ -26,12 +27,13 @@
       win_shell: |
         # Disable Windows audio enhancements
         $audioKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Audio"
-        New-ItemProperty -Path $audioKey -Name "DisableProtectedAudioDG" -Value 1 -PropertyType DWORD -Force
-        
+        New-ItemProperty -Path $audioKey -Name "DisableProtectedAudioDG" \
+          -Value 1 -PropertyType DWORD -Force
+
         # Set audio service priority to high
         $serviceKey = "HKLM:\SYSTEM\CurrentControlSet\Services\AudioSrv"
         Set-ItemProperty -Path $serviceKey -Name "Priority" -Value 1
-        
+
         # Configure MMCSS for audio
         $mmcssKey = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio"
         New-Item -Path $mmcssKey -Force
@@ -56,7 +58,9 @@
         $regPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render"
         Get-ChildItem $regPath | ForEach-Object {
           $devicePath = "$($_.PSPath)\Properties"
-          Set-ItemProperty -Path $devicePath -Name "{a45c254e-df1c-4efd-8020-67d146a850e0},2" -Value 0 -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path $devicePath \
+            -Name "{a45c254e-df1c-4efd-8020-67d146a850e0},2" \
+            -Value 0 -ErrorAction SilentlyContinue
         }
 
     - name: Create audio workstation shortcuts
@@ -96,13 +100,16 @@
     - name: Configure Core Audio for low latency
       shell: |
         # Set audio buffer size
-        sudo defaults write /Library/Preferences/Audio\ MIDI\ Setup com.apple.audio.buffer-size -int 128
-        
+        sudo defaults write /Library/Preferences/Audio\ MIDI\ Setup \
+          com.apple.audio.buffer-size -int 128
+
         # Set sample rate to 48kHz
-        sudo defaults write /Library/Preferences/Audio\ MIDI\ Setup com.apple.audio.sample-rate -int 48000
-        
+        sudo defaults write /Library/Preferences/Audio\ MIDI\ Setup \
+          com.apple.audio.sample-rate -int 48000
+
         # Enable aggregate device capabilities
-        defaults write com.apple.audio.AudioMIDISetup "aggregate device enabled" -bool true
+        defaults write com.apple.audio.AudioMIDISetup \
+          "aggregate device enabled" -bool true
 
     - name: Create BlackHole audio routing configuration
       copy:
@@ -110,7 +117,7 @@
           #!/bin/bash
           # Configure BlackHole for audio routing
           echo "Setting up BlackHole audio routing..."
-          
+
           # This script should be run to setup multi-output device
           # with BlackHole for professional audio routing
           open -a "Audio MIDI Setup"
@@ -146,7 +153,7 @@
       user:
         name: "{{ ansible_user }}"
         groups: audio
-        append: yes
+        append: true
       become: true
 
     - name: Configure real-time audio limits
@@ -198,13 +205,19 @@
     that:
       - ansible_processor_cores >= 4
       - ansible_memory_mb.real.total >= 16384
-    fail_msg: "System does not meet minimum requirements for audio workstation (4 cores, 16GB RAM)"
+    fail_msg: >
+      System does not meet minimum requirements for audio workstation
+      (4 cores, 16GB RAM)
     success_msg: "System meets audio workstation requirements"
 
 - name: Check disk space for audio projects
   debug:
-    msg: 
-      - "Available disk space: {{ ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first | default(0) | int / 1024 / 1024 / 1024 | round(2) }} GB"
+    msg:
+      - >
+        Available disk space:
+        {{ ansible_mounts | selectattr('mount', 'equalto', '/') |
+        map(attribute='size_available') | first | default(0) | int /
+        1024 / 1024 / 1024 | round(2) }} GB
   when: ansible_os_family != "Windows"
 
 - name: Windows disk space check

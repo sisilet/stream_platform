@@ -66,7 +66,9 @@
     that:
       - ansible_processor_cores >= 8
       - ansible_memory_mb.real.total >= 16384
-    fail_msg: "System does not meet minimum requirements for video capture (8 cores, 16GB RAM)"
+    fail_msg: >
+      System does not meet minimum requirements for video capture
+      (8 cores, 16GB RAM)
     success_msg: "System meets video capture requirements"
 
 - name: Display detected video devices

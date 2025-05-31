@@ -14,8 +14,11 @@
   gather_facts: true
   vars:
     event_name: "{{ event_name | default('streaming-event') }}"
-    resource_group: "{{ hostvars['localhost']['streaming_resource_group'] | default('streaming-' + event_name + '-' + ansible_date_time.epoch) }}"
-    azure_location: "{{ hostvars['localhost']['streaming_location'] | default('East US') }}"
+    resource_group: >
+      {{ hostvars['localhost']['streaming_resource_group'] |
+      default('streaming-' + event_name + '-' + ansible_date_time.epoch) }}
+    azure_location: >
+      {{ hostvars['localhost']['streaming_location'] | default('East US') }}
     acr_name: "{{ acr_name | default('streamingregistry') }}"
     
     # Container configuration
@@ -47,7 +50,8 @@
           LOG_LEVEL: "INFO"
         restart_policy: Always
         ip_address: public
-        dns_name_label: "srt-relay-{{ event_name }}-{{ ansible_date_time.epoch }}"
+        dns_name_label: >
+          srt-relay-{{ event_name }}-{{ ansible_date_time.epoch }}
         tags:
           purpose: streaming
           event: "{{ event_name }}"
@@ -75,7 +79,8 @@
           LOG_LEVEL: "INFO"
         restart_policy: Always
         ip_address: public
-        dns_name_label: "slide-splitter-{{ event_name }}-{{ ansible_date_time.epoch }}"
+        dns_name_label: >
+          slide-splitter-{{ event_name }}-{{ ansible_date_time.epoch }}
         tags:
           purpose: streaming
           event: "{{ event_name }}"
@@ -89,12 +94,16 @@
     # ========================================================================
     - name: Configure container firewall rules
       debug:
-        msg: "Container firewall rules configured via Azure Container Instance security"
+        msg: >
+          Container firewall rules configured via Azure Container Instance
+          security
       tags: [configure]
 
     - name: Set container resource limits
       debug:
-        msg: "Container resources: Relay({{ relay_cpu }}CPU/{{ relay_memory }}GB), Splitter({{ splitter_cpu }}CPU/{{ splitter_memory }}GB)"
+        msg: >
+          Container resources: Relay({{ relay_cpu }}CPU/{{ relay_memory }}GB),
+          Splitter({{ splitter_cpu }}CPU/{{ splitter_memory }}GB)
       tags: [configure]
 
     # ========================================================================
@@ -105,7 +114,9 @@
         name: "{{ item }}"
         resource_group: "{{ resource_group }}"
       register: container_info
-      until: container_info.containerinstances[0].instance_view.current_state.state == "Running"
+      until: >
+        container_info.containerinstances[0].instance_view.current_state.state
+        == "Running"
       retries: 10
       delay: 30
       loop:
@@ -162,11 +173,12 @@
     - name: Add SRT Relay to dynamic inventory
       add_host:
         name: "{{ relay_container.fqdn }}"
-        groups: 
+        groups:
           - containers
           - srt_relay
         ansible_host: "{{ relay_container.ip_address }}"
-        ansible_connection: local  # We'll use HTTP API calls for container management
+        # We'll use HTTP API calls for container management
+        ansible_connection: local
         container_name: "srt-relay-{{ event_name }}"
         container_type: srt-relay
         service_port: 9998
@@ -178,10 +190,11 @@
       add_host:
         name: "{{ splitter_container.fqdn }}"
         groups:
-          - containers  
+          - containers
           - slide_splitter
         ansible_host: "{{ splitter_container.ip_address }}"
-        ansible_connection: local  # We'll use HTTP API calls for container management
+        # We'll use HTTP API calls for container management
+        ansible_connection: local
         container_name: "slide-splitter-{{ event_name }}"
         container_type: slide-splitter
         service_port: 9999

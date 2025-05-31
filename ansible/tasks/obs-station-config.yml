@@ -19,7 +19,9 @@
 
     - name: Validate OBS Studio version
       win_shell: |
-        $version = (Get-ItemProperty "C:\Program Files\obs-studio\bin\64bit\obs64.exe").VersionInfo.FileVersion
+        $version = (Get-ItemProperty \
+          "C:\Program Files\obs-studio\bin\64bit\obs64.exe"
+        ).VersionInfo.FileVersion
         Write-Output $version
       register: obs_version_check
       when: obs_exe_check.stat.exists
@@ -34,7 +36,7 @@
         content: |
           [General]
           Name=Streaming
-          
+
           [Video]
           BaseCX=1920
           BaseCY=1080
@@ -42,14 +44,14 @@
           OutputCY=1080
           FPSType=0
           FPSCommon=30
-          
+
           [Audio]
           SampleRate=48000
           ChannelSetup=Stereo
-          
+
           [Output]
           Mode=Simple
-          
+
           [SimpleOutput]
           VBitrate=6000
           StreamEncoder=x264
@@ -62,8 +64,9 @@
       win_shell: |
         # Set audio buffer size for low latency
         $audioKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Audio"
-        New-ItemProperty -Path $audioKey -Name "DisableProtectedAudioDG" -Value 1 -PropertyType DWORD -Force
-        
+        New-ItemProperty -Path $audioKey -Name "DisableProtectedAudioDG" \
+          -Value 1 -PropertyType DWORD -Force
+
         # Set multimedia class scheduler for audio
         $mmcssKey = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"
         Set-ItemProperty -Path $mmcssKey -Name "SystemResponsiveness" -Value 1
@@ -94,7 +97,7 @@
 
   when: ansible_os_family == "Windows"
 
-# macOS OBS Station Configuration  
+# macOS OBS Station Configuration
 - name: macOS OBS Station Block
   block:
     - name: Check OBS installation
@@ -117,8 +120,9 @@
     - name: Set macOS audio preferences for OBS
       shell: |
         # Set audio sample rate to 48kHz
-        sudo defaults write /Library/Preferences/Audio\ MIDI\ Setup com.apple.audio.aggregate.sample-rate -int 48000
-        
+        sudo defaults write /Library/Preferences/Audio\ MIDI\ Setup \
+          com.apple.audio.aggregate.sample-rate -int 48000
+
         # Enable exclusive mode for audio devices
         defaults write com.apple.coreaudio "Exclusive Mode" -bool true
 
@@ -131,7 +135,7 @@
       - "CPU Cores: {{ ansible_processor_cores }}"
       - "RAM: {{ ansible_memory_mb.real.total }} MB"
       - "Free RAM: {{ ansible_memory_mb.real.free }} MB"
-  
+
 - name: Validate minimum requirements for OBS
   assert:
     that:
@@ -150,6 +154,6 @@
 
 - name: Display network test results
   debug:
-    msg: 
+    msg:
       - "YouTube RTMP connectivity: {{ 'OK' if youtube_connectivity.status == 200 else 'FAILED' }}"
       - "Response time: {{ youtube_connectivity.elapsed if youtube_connectivity.elapsed is defined else 'N/A' }}s" 

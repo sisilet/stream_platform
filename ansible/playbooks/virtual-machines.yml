@@ -29,9 +29,9 @@
     
     # Mixer configuration
     mixer_configs:
-      - { name: "mixer-01", ip: "10.42.2.11", language: "original", audio_channels: "0,1" }
-      - { name: "mixer-02", ip: "10.42.2.12", language: "language-a", audio_channels: "2,3" }
-      - { name: "mixer-03", ip: "10.42.2.13", language: "language-b", audio_channels: "4,5" }
+      - {name: "mixer-01", ip: "10.42.2.11", language: "original", audio_channels: "0,1"}
+      - {name: "mixer-02", ip: "10.42.2.12", language: "language-a", audio_channels: "2,3"}
+      - {name: "mixer-03", ip: "10.42.2.13", language: "language-b", audio_channels: "4,5"}
 
   tasks:
     # ========================================================================

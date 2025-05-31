@@ -54,7 +54,7 @@ jobs:
     - name: Lint Ansible playbooks
       run: |
         ansible-lint ansible/
-        yamllint ansible/
+        yamllint -c ansible/.yamllint.yml ansible/
 
     - name: Validate playbook syntax
       run: |
